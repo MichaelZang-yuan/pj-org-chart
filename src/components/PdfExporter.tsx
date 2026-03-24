@@ -152,73 +152,68 @@ export default function PdfExporter({ data }: PdfExporterProps) {
 
       // ══════════════════════════════════════════════════════════════════
       // STEP 1: Calculate the exact content size needed
+      // Departments are stacked VERTICALLY — each gets its own band.
+      // Height = SUM of all department heights, not just the tallest.
       // ══════════════════════════════════════════════════════════════════
 
-      // Temp PDF just for measuring text widths
       const tmp = new jsPDF({ unit: "mm", orientation: "l", format: "a4" });
 
-      // --- Measure each department column ---
       interface DeptLayout {
         dept: DepartmentGroup;
         labelW: number;
-        colW: number;
+        staffRowW: number;
         rows: Employee[][];
-        colH: number;
+        bandH: number; // total height for this dept band (label + staff rows)
       }
       const deptLayouts: DeptLayout[] = [];
 
       for (const dept of data.departments) {
-        // Label pill width: measure text then add padding
         tmp.setFont("helvetica", "bold");
         tmp.setFontSize(8.5);
         const labelW = tmp.getTextWidth(dept.name) + 18;
 
-        // Split staff into rows of MAX_PER_ROW
         const rows: Employee[][] = [];
         for (let i = 0; i < dept.staff.length; i += MAX_PER_ROW) {
           rows.push(dept.staff.slice(i, i + MAX_PER_ROW));
         }
 
-        // Column width = max(label, widest staff row)
-        const staffRowW = Math.min(dept.staff.length, MAX_PER_ROW) * (STAFF_W + STAFF_GAP_H) - STAFF_GAP_H;
-        const colW = Math.max(labelW, staffRowW, STAFF_W);
+        const numCols = Math.min(dept.staff.length || 1, MAX_PER_ROW);
+        const staffRowW = numCols * (STAFF_W + STAFF_GAP_H) - STAFF_GAP_H;
 
-        // Column height = label + gap + staff rows
         const staffTotalH = rows.length > 0
           ? rows.length * STAFF_H + (rows.length - 1) * STAFF_GAP_V
           : 0;
-        const colH = LABEL_H + LABEL_TO_STAFF + staffTotalH;
+        const bandH = LABEL_H + LABEL_TO_STAFF + staffTotalH;
 
-        deptLayouts.push({ dept, labelW, colW, rows, colH });
+        deptLayouts.push({ dept, labelW, staffRowW, rows, bandH });
       }
 
-      // --- Width of each level ---
+      // --- Width: widest row across all levels ---
       const dirRowW = DIR_W;
       const mgrRowW = data.managers.length > 0
         ? data.managers.length * MGR_W + (data.managers.length - 1) * GAP_H
         : 0;
-      const deptRowW = deptLayouts.length > 0
-        ? deptLayouts.reduce((s, d) => s + d.colW, 0) + (deptLayouts.length - 1) * DEPT_GAP
+      const deptMaxRowW = deptLayouts.length > 0
+        ? Math.max(...deptLayouts.map((d) => Math.max(d.labelW, d.staffRowW)))
+        : 0;
+      const maxContentW = Math.max(dirRowW, mgrRowW, deptMaxRowW);
+
+      // --- Height: SUM of all department bands ---
+      const allDeptsH = deptLayouts.length > 0
+        ? deptLayouts.reduce((s, d) => s + d.bandH, 0) + (deptLayouts.length - 1) * GAP_V
         : 0;
 
-      const maxContentW = Math.max(dirRowW, mgrRowW, deptRowW);
-
-      // --- Height of content ---
-      const maxDeptColH = deptLayouts.length > 0
-        ? Math.max(...deptLayouts.map((d) => d.colH))
-        : 0;
       let contentH = 0;
       if (data.director) contentH += DIR_H + GAP_V;
       if (data.managers.length > 0) contentH += MGR_H + GAP_V;
-      if (deptLayouts.length > 0) contentH += maxDeptColH;
+      contentH += allDeptsH;
 
-      // --- Final page dimensions (minimum A3 landscape = 420×297) ---
       const PAGE_W = Math.max(420, maxContentW + MARGIN * 2);
-      const PAGE_H = Math.max(297, HEADER_H + 10 + contentH + 10 + FOOTER_H);
+      const PAGE_H = Math.max(297, HEADER_H + 12 + contentH + 12 + FOOTER_H);
 
       console.log(`[PDF] Page 1 size: ${PAGE_W.toFixed(0)}×${PAGE_H.toFixed(0)}mm`);
-      console.log(`[PDF] Content widths — Dir: ${dirRowW}, Mgr: ${mgrRowW.toFixed(0)}, Dept: ${deptRowW.toFixed(0)}`);
-      console.log(`[PDF] Content height: ${contentH.toFixed(0)}mm, Dept col heights:`, deptLayouts.map(d => `${d.dept.name}=${d.colH.toFixed(0)}`));
+      console.log(`[PDF] Content widths — Dir: ${dirRowW}, Mgr: ${mgrRowW.toFixed(0)}, DeptMaxRow: ${deptMaxRowW.toFixed(0)}`);
+      console.log(`[PDF] Content height: ${contentH.toFixed(0)}mm (allDeptsH=${allDeptsH.toFixed(0)})`);
 
       // ══════════════════════════════════════════════════════════════════
       // STEP 2: Create PDF and draw Page 1 — Org Chart
@@ -278,56 +273,56 @@ export default function PdfExporter({ data }: PdfExporterProps) {
       const mgrBottomY = curY + MGR_H;
       curY = mgrBottomY + GAP_V;
 
-      // ── Departments ──
-      if (deptLayouts.length > 0) {
-        const startX = (PAGE_W - deptRowW) / 2;
-        let deptX = startX;
+      // ── Departments (stacked vertically, one per band) ──
+      for (let di = 0; di < deptLayouts.length; di++) {
+        const { dept, labelW, staffRowW, rows } = deptLayouts[di];
+        const bandCX = PAGE_W / 2; // center each band on the page
+
+        // Pill label — never truncated
         const labelY = curY;
-        const staffStartY = labelY + LABEL_H + LABEL_TO_STAFF;
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(8.5);
+        const lx = bandCX - labelW / 2;
+        pdf.setFillColor(...hex(dept.color));
+        pdf.roundedRect(lx, labelY, labelW, LABEL_H, 5, 5, "F");
+        pdf.setTextColor(255, 255, 255);
+        pdf.text(dept.name, bandCX, labelY + 8, { align: "center" });
+        console.log(`[PDF] Drew dept label: "${dept.name}" at y=${labelY.toFixed(0)}, labelW=${labelW.toFixed(0)}`);
 
-        for (let di = 0; di < deptLayouts.length; di++) {
-          const { dept, labelW, colW, rows } = deptLayouts[di];
-          const cx = deptX + colW / 2;
-
-          // Pill label — never truncated
-          pdf.setFont("helvetica", "bold");
-          pdf.setFontSize(8.5);
-          const lx = cx - labelW / 2;
-          pdf.setFillColor(...hex(dept.color));
-          pdf.roundedRect(lx, labelY, labelW, LABEL_H, 5, 5, "F");
-          pdf.setTextColor(255, 255, 255);
-          pdf.text(dept.name, cx, labelY + 8, { align: "center" });
-          console.log(`[PDF] Drew dept label: "${dept.name}" at x=${lx.toFixed(0)}, labelW=${labelW.toFixed(0)}`);
-
-          // Manager → Dept label line
-          if (dept.manager) {
-            const mp = mgrPos.find((p) => p.name === dept.manager!.name);
-            if (mp) drawL(pdf, mp.cx, mgrBottomY, cx, labelY);
-          }
-
-          // Staff cards — iterate every single employee
-          let sy = staffStartY;
-          for (let ri = 0; ri < rows.length; ri++) {
-            const row = rows[ri];
-            const rowW = row.length * (STAFF_W + STAFF_GAP_H) - STAFF_GAP_H;
-            let sx = cx - rowW / 2;
-
-            for (let si = 0; si < row.length; si++) {
-              const emp = row[si];
-              drawCard(pdf, sx, sy, STAFF_W, STAFF_H, emp, dept.color);
-              drawL(pdf, cx, labelY + LABEL_H, sx + STAFF_W / 2, sy);
-              drawnCount++;
-              console.log(`[PDF] Drew staff: ${emp.name} (${dept.name}) at x=${sx.toFixed(0)}, y=${sy.toFixed(0)}`);
-              sx += STAFF_W + STAFF_GAP_H;
-            }
-            sy += STAFF_H + STAFF_GAP_V;
-          }
-
-          deptX += colW + DEPT_GAP;
+        // Manager → Dept label line
+        if (dept.manager) {
+          const mp = mgrPos.find((p) => p.name === dept.manager!.name);
+          if (mp) drawL(pdf, mp.cx, mgrBottomY, bandCX, labelY);
         }
+
+        // Staff cards
+        let sy = labelY + LABEL_H + LABEL_TO_STAFF;
+        for (let ri = 0; ri < rows.length; ri++) {
+          const row = rows[ri];
+          const rowW = row.length * (STAFF_W + STAFF_GAP_H) - STAFF_GAP_H;
+          let sx = bandCX - rowW / 2;
+
+          for (let si = 0; si < row.length; si++) {
+            const emp = row[si];
+            drawCard(pdf, sx, sy, STAFF_W, STAFF_H, emp, dept.color);
+            drawL(pdf, bandCX, labelY + LABEL_H, sx + STAFF_W / 2, sy);
+            drawnCount++;
+            console.log(`[PDF] Drew staff: ${emp.name} (${dept.name}) at x=${sx.toFixed(0)}, y=${sy.toFixed(0)}`);
+            sx += STAFF_W + STAFF_GAP_H;
+          }
+          sy += STAFF_H + STAFF_GAP_V;
+        }
+
+        // Advance curY past this department band
+        curY += deptLayouts[di].bandH + GAP_V;
       }
 
-      console.log(`[PDF] Page 1 done. Drew ${drawnCount} employee cards. Expected: ${data.totalEmployees}`);
+      // Verify employee count
+      if (drawnCount !== data.totalEmployees) {
+        console.warn(`[PDF] ⚠️ MISMATCH: drew ${drawnCount} cards but totalEmployees=${data.totalEmployees}`);
+      } else {
+        console.log(`[PDF] ✓ Page 1 done. Drew all ${drawnCount} employees.`);
+      }
 
       // Footer
       pdf.setTextColor(120, 120, 120);
