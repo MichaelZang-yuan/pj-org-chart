@@ -26,7 +26,6 @@ function hex(c: string): [number, number, number] {
   ];
 }
 
-/** Truncate text so it fits within maxW (mm) at the current font/size. */
 function trunc(pdf: any, text: string, maxW: number): string {
   if (!text) return "";
   if (pdf.getTextWidth(text) <= maxW) return text;
@@ -47,11 +46,9 @@ function drawCard(
   color: string
 ) {
   const [cr, cg, cb] = hex(color);
-
-  const PAD = 3; // inner padding
+  const PAD = 3;
 
   if (emp.vacant) {
-    // white fill + dashed colored border
     pdf.setFillColor(255, 255, 255);
     pdf.setDrawColor(cr, cg, cb);
     pdf.setLineWidth(0.5);
@@ -59,7 +56,6 @@ function drawCard(
     pdf.roundedRect(x, y, w, h, 2.5, 2.5, "FD");
     pdf.setLineDashPattern([], 0);
 
-    // "VACANT" badge
     pdf.setFillColor(cr, cg, cb);
     pdf.roundedRect(x + PAD, y + 2, 16, 4.5, 1, 1, "F");
     pdf.setTextColor(255, 255, 255);
@@ -67,7 +63,6 @@ function drawCard(
     pdf.setFontSize(5.5);
     pdf.text("VACANT", x + PAD + 1, y + 5);
 
-    // name in dept color
     pdf.setTextColor(cr, cg, cb);
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(10);
@@ -79,27 +74,23 @@ function drawCard(
     return;
   }
 
-  // solid coloured card
   pdf.setFillColor(cr, cg, cb);
   pdf.roundedRect(x, y, w, h, 2.5, 2.5, "F");
 
   let ty = y + 6.5;
 
-  // name — 10pt bold (maps to 16px on screen)
   pdf.setTextColor(255, 255, 255);
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(10);
   pdf.text(trunc(pdf, emp.name, w - PAD * 2), x + PAD, ty);
   ty += 5;
 
-  // position — 8.5pt (maps to 14px on screen)
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(8.5);
   pdf.setTextColor(230, 235, 245);
   pdf.text(trunc(pdf, emp.position, w - PAD * 2), x + PAD, ty);
   ty += 4.5;
 
-  // start date + visa — 7pt (maps to 12px on screen)
   let info = emp.startDate || "";
   if (emp.visaStatus) info += (info ? " \u00b7 " : "") + emp.visaStatus;
   if (info) {
@@ -109,7 +100,6 @@ function drawCard(
     ty += 4;
   }
 
-  // salary — 7pt (maps to 12px on screen)
   const sal = emp.annualSalary
     ? `$${emp.annualSalary.toLocaleString()}/yr`
     : emp.hourlyRate
@@ -124,15 +114,7 @@ function drawCard(
   }
 }
 
-// ── L-shaped connector ──────────────────────────────────────────────────────
-
-function drawL(
-  pdf: any,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number
-) {
+function drawL(pdf: any, x1: number, y1: number, x2: number, y2: number) {
   const midY = y1 + (y2 - y1) / 2;
   pdf.setDrawColor(148, 163, 184);
   pdf.setLineWidth(0.35);
@@ -140,6 +122,16 @@ function drawL(
   pdf.line(x1, y1, x1, midY);
   pdf.line(x1, midY, x2, midY);
   pdf.line(x2, midY, x2, y2);
+}
+
+// ── layout types ─────────────────────────────────────────────────────────────
+
+interface DeptLayout {
+  dept: DepartmentGroup;
+  colW: number;
+  labelW: number;
+  rows: Employee[][];
+  colH: number; // label + gap + all staff rows
 }
 
 // ── main component ──────────────────────────────────────────────────────────
@@ -152,22 +144,88 @@ export default function PdfExporter({ data }: PdfExporterProps) {
     try {
       const { jsPDF } = await import("jspdf");
 
-      const A3_W = 420;
-      const A3_H = 297;
-      const MARGIN = 15;
+      const MARGIN = 18;
       const HEADER_H = 25;
+      const FOOTER_H = 14;
 
-      const pdf = new jsPDF({
-        orientation: "landscape",
-        unit: "mm",
-        format: "a3",
-      });
+      // card dimensions
+      const DIR_W = 82, DIR_H = 38;
+      const MGR_W = 72, MGR_H = 34;
+      const STAFF_W = 62, STAFF_H = 30;
+      const GAP_V = 16;  // vertical gap between levels
+      const GAP_H = 8;   // horizontal gap between cards in a row
+      const STAFF_GAP = 5;
+      const LABEL_H = 11;
+      const LABEL_TO_STAFF = 10;
+      const MAX_PER_ROW = 3;
+      const DEPT_GAP = 14;
 
-      // ── shared header / footer helpers ──
+      // ================================================================
+      // PASS 1: measure everything to determine page size
+      // ================================================================
 
+      // Use a temporary PDF just for text measurement
+      const m = new jsPDF({ unit: "mm", format: "a4" });
+
+      // Measure dept label widths and compute column layouts
+      m.setFont("helvetica", "bold");
+      m.setFontSize(8.5);
+
+      const deptLayouts: DeptLayout[] = [];
+
+      for (const dept of data.departments) {
+        const labelW = m.getTextWidth(dept.name) + 16; // padding inside pill
+
+        const rows: Employee[][] = [];
+        for (let i = 0; i < dept.staff.length; i += MAX_PER_ROW)
+          rows.push(dept.staff.slice(i, i + MAX_PER_ROW));
+
+        const numCols = Math.min(dept.staff.length || 1, MAX_PER_ROW);
+        const staffRowW = numCols * (STAFF_W + STAFF_GAP) - STAFF_GAP;
+        const colW = Math.max(labelW, staffRowW);
+
+        const staffH = rows.length > 0
+          ? rows.length * STAFF_H + (rows.length - 1) * STAFF_GAP
+          : 0;
+        const colH = LABEL_H + LABEL_TO_STAFF + staffH;
+
+        deptLayouts.push({ dept, colW, labelW, rows, colH });
+      }
+
+      // Width needed per level
+      const dirW = DIR_W;
+      const mgrTotalW =
+        data.managers.length * MGR_W +
+        Math.max(0, data.managers.length - 1) * GAP_H;
+      const deptTotalW =
+        deptLayouts.reduce((s, d) => s + d.colW, 0) +
+        Math.max(0, deptLayouts.length - 1) * DEPT_GAP;
+
+      const contentW = Math.max(dirW, mgrTotalW, deptTotalW);
+      const maxDeptH = deptLayouts.length > 0
+        ? Math.max(...deptLayouts.map((d) => d.colH))
+        : 0;
+
+      // Height needed
+      let contentH = 0;
+      if (data.director) contentH += DIR_H + GAP_V;
+      if (data.managers.length) contentH += MGR_H + GAP_V;
+      contentH += maxDeptH;
+
+      // Final page dimensions (at least A3 landscape)
+      const PAGE_W = Math.max(420, contentW + MARGIN * 2);
+      const PAGE_H = Math.max(297, HEADER_H + 8 + contentH + FOOTER_H + 8);
+
+      // ================================================================
+      // PASS 2: create real PDF and draw
+      // ================================================================
+
+      const pdf = new jsPDF({ unit: "mm", format: [PAGE_W, PAGE_H] });
+
+      // header / footer helpers using actual page dims
       const drawHeader = (line1: string, line2: string) => {
         pdf.setFillColor(...hex("#1E3A5F"));
-        pdf.rect(0, 0, A3_W, HEADER_H, "F");
+        pdf.rect(0, 0, PAGE_W, HEADER_H, "F");
         pdf.setTextColor(255, 255, 255);
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(16);
@@ -181,135 +239,77 @@ export default function PdfExporter({ data }: PdfExporterProps) {
         pdf.setTextColor(120, 120, 120);
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(7);
-        if (left) pdf.text(left, MARGIN, A3_H - 8);
-        pdf.text("Confidential", A3_W - MARGIN, A3_H - 8, { align: "right" });
+        if (left) pdf.text(left, MARGIN, PAGE_H - 8);
+        pdf.text("Confidential", PAGE_W - MARGIN, PAGE_H - 8, {
+          align: "right",
+        });
       };
 
-      // ====================================================================
-      // PAGE 1 — Organisation Chart
-      // ====================================================================
+      // ── Page 1: Org Chart ──
 
       drawHeader(
         data.companyName,
         `Organisation Chart \u2014 As at ${data.asAtDate}`
       );
 
-      // sizing constants (enlarged to match 16/14/12px web fonts)
-      const DIR_W = 82,
-        DIR_H = 38;
-      const MGR_W = 72,
-        MGR_H = 34;
-      const GAP_V = 14;
-      const GAP_H = 7;
+      let curY = HEADER_H + 8;
 
-      // adaptive staff card sizing based on department count
-      const deptCount = data.departments.length;
-      let STAFF_W: number, MAX_PER_ROW: number, DEPT_GAP: number;
-      if (deptCount <= 2) {
-        STAFF_W = 64;
-        MAX_PER_ROW = 4;
-        DEPT_GAP = 14;
-      } else if (deptCount <= 4) {
-        STAFF_W = 56;
-        MAX_PER_ROW = 3;
-        DEPT_GAP = 10;
-      } else {
-        STAFF_W = 48;
-        MAX_PER_ROW = 2;
-        DEPT_GAP = 8;
-      }
-      const STAFF_H = 30;
-      const STAFF_GAP = 4;
-      const LABEL_H = 10;
-
-      let curY = HEADER_H + 6;
-
-      // ── Director ──
-      let dirCX = A3_W / 2;
+      // Director
+      let dirCX = PAGE_W / 2;
       if (data.director) {
-        const dx = (A3_W - DIR_W) / 2;
+        const dx = (PAGE_W - DIR_W) / 2;
         drawCard(pdf, dx, curY, DIR_W, DIR_H, data.director, DIRECTOR_COLOR);
         dirCX = dx + DIR_W / 2;
       }
       const dirBottomY = curY + DIR_H;
       curY = dirBottomY + GAP_V;
 
-      // ── Managers ──
-      interface MgrPos {
-        cx: number;
-        name: string;
-      }
+      // Managers
+      interface MgrPos { cx: number; name: string }
       const mgrPos: MgrPos[] = [];
 
       if (data.managers.length > 0) {
-        const totalW =
-          data.managers.length * MGR_W +
-          (data.managers.length - 1) * GAP_H;
-        let mx = (A3_W - totalW) / 2;
-
+        let mx = (PAGE_W - mgrTotalW) / 2;
         for (const mgr of data.managers) {
           drawCard(pdf, mx, curY, MGR_W, MGR_H, mgr, MANAGER_COLOR);
           const cx = mx + MGR_W / 2;
           mgrPos.push({ cx, name: mgr.name });
-
-          // director → manager line
           if (data.director) drawL(pdf, dirCX, dirBottomY, cx, curY);
-
           mx += MGR_W + GAP_H;
         }
       }
       const mgrBottomY = curY + MGR_H;
       curY = mgrBottomY + GAP_V;
 
-      // ── Departments ──
-      if (data.departments.length > 0) {
-        // compute column widths
-        const layouts: {
-          dept: DepartmentGroup;
-          colW: number;
-          rows: Employee[][];
-        }[] = [];
-
-        for (const dept of data.departments) {
-          const rows: Employee[][] = [];
-          for (let i = 0; i < dept.staff.length; i += MAX_PER_ROW)
-            rows.push(dept.staff.slice(i, i + MAX_PER_ROW));
-          const cols = Math.min(dept.staff.length || 1, MAX_PER_ROW);
-          const colW = cols * (STAFF_W + STAFF_GAP) - STAFF_GAP;
-          layouts.push({ dept, colW: Math.max(colW, 30), rows });
-        }
-
-        const totalDeptW =
-          layouts.reduce((s, l) => s + l.colW, 0) +
-          (layouts.length - 1) * DEPT_GAP;
-        let deptX = Math.max(MARGIN, (A3_W - totalDeptW) / 2);
-
+      // Departments
+      if (deptLayouts.length > 0) {
+        let deptX = (PAGE_W - deptTotalW) / 2;
         const labelY = curY;
-        const staffStartY = labelY + LABEL_H + 8;
+        const staffStartY = labelY + LABEL_H + LABEL_TO_STAFF;
 
-        for (const { dept, colW, rows } of layouts) {
+        for (const { dept, colW, labelW, rows } of deptLayouts) {
           const cx = deptX + colW / 2;
 
-          // pill label — 8.5pt bold (maps to 14px on screen)
+          // pill label — full text, never truncated
           pdf.setFont("helvetica", "bold");
           pdf.setFontSize(8.5);
-          const lw = Math.max(pdf.getTextWidth(dept.name) + 14, 28);
-          const lx = cx - lw / 2;
+          const lx = cx - labelW / 2;
           pdf.setFillColor(...hex(dept.color));
-          pdf.roundedRect(lx, labelY, lw, LABEL_H, 5, 5, "F");
+          pdf.roundedRect(lx, labelY, labelW, LABEL_H, 5, 5, "F");
           pdf.setTextColor(255, 255, 255);
-          pdf.text(dept.name, cx, labelY + 7, { align: "center" });
+          pdf.text(dept.name, cx, labelY + 7.5, { align: "center" });
 
           // manager → label line
           if (dept.manager) {
-            const mp = mgrPos.find((m) => m.name === dept.manager!.name);
+            const mp = mgrPos.find((p) => p.name === dept.manager!.name);
             if (mp) drawL(pdf, mp.cx, mgrBottomY, cx, labelY);
           }
 
-          // staff cards
+          // staff cards — every employee drawn
           let sy = staffStartY;
           for (const row of rows) {
-            const rowW = row.length * (STAFF_W + STAFF_GAP) - STAFF_GAP;
+            const rowW =
+              row.length * (STAFF_W + STAFF_GAP) - STAFF_GAP;
             let sx = cx - rowW / 2;
             for (const emp of row) {
               drawCard(pdf, sx, sy, STAFF_W, STAFF_H, emp, dept.color);
@@ -327,14 +327,25 @@ export default function PdfExporter({ data }: PdfExporterProps) {
         `Total Employees: ${data.totalEmployees}  |  Total Annual Payroll: $${data.totalAnnualPayroll.toLocaleString()}`
       );
 
-      // ====================================================================
-      // PAGE 2 — Salary Table
-      // ====================================================================
+      // ── Page 2: Salary Table (always A3 landscape) ──
 
-      pdf.addPage("a3", "landscape");
-      drawHeader(
-        data.companyName,
-        `Employee Salary Details \u2014 As at ${data.asAtDate}`
+      const T_W = 420;
+      const T_H = 297;
+      pdf.addPage([T_W, T_H]);
+
+      // header
+      pdf.setFillColor(...hex("#1E3A5F"));
+      pdf.rect(0, 0, T_W, HEADER_H, "F");
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(16);
+      pdf.text(data.companyName, MARGIN, 12);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+      pdf.text(
+        `Employee Salary Details \u2014 As at ${data.asAtDate}`,
+        MARGIN,
+        20
       );
 
       const cols = [
@@ -349,7 +360,7 @@ export default function PdfExporter({ data }: PdfExporterProps) {
         { label: "Monthly Salary", w: 42, right: true },
       ];
       const TW = cols.reduce((s, c) => s + c.w, 0);
-      const TX = MARGIN + (A3_W - 2 * MARGIN - TW) / 2;
+      const TX = MARGIN + (T_W - 2 * MARGIN - TW) / 2;
       const RH = 6.5;
       let ty = HEADER_H + 8;
 
@@ -376,7 +387,8 @@ export default function PdfExporter({ data }: PdfExporterProps) {
       ];
       if (mgmt.length) groups.push({ name: "Management", employees: mgmt });
       for (const d of data.departments)
-        if (d.staff.length) groups.push({ name: d.name, employees: d.staff });
+        if (d.staff.length)
+          groups.push({ name: d.name, employees: d.staff });
 
       let grandMonthly = 0;
 
@@ -389,7 +401,6 @@ export default function PdfExporter({ data }: PdfExporterProps) {
           subAnnual += e.annualSalary || 0;
           subMonthly += e.monthlySalary || 0;
 
-          // alternating row bg
           if (i % 2 === 1) {
             pdf.setFillColor(248, 250, 252);
             pdf.rect(TX, ty, TW, RH, "F");
@@ -428,7 +439,7 @@ export default function PdfExporter({ data }: PdfExporterProps) {
         }
         grandMonthly += subMonthly;
 
-        // subtotal row
+        // subtotal
         pdf.setFillColor(229, 231, 235);
         pdf.rect(TX, ty, TW, RH, "F");
         pdf.setTextColor(55, 65, 81);
@@ -439,8 +450,7 @@ export default function PdfExporter({ data }: PdfExporterProps) {
           TX + 2,
           ty + 4.2
         );
-        const annColX =
-          TX + cols.slice(0, 7).reduce((s, c) => s + c.w, 0);
+        const annColX = TX + cols.slice(0, 7).reduce((s, c) => s + c.w, 0);
         pdf.text(
           `$${subAnnual.toLocaleString()}`,
           annColX + cols[7].w - 2,
@@ -481,7 +491,11 @@ export default function PdfExporter({ data }: PdfExporterProps) {
         { align: "right" }
       );
 
-      drawFooter();
+      // footer
+      pdf.setTextColor(120, 120, 120);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.text("Confidential", T_W - MARGIN, T_H - 8, { align: "right" });
 
       // save
       const fn = `${data.companyName.replace(/\s+/g, "_")}_OrgChart_${data.asAtDate.replace(/\s+/g, "_")}.pdf`;
