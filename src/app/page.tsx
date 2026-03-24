@@ -1,6 +1,5 @@
 "use client";
 
-import { useRef } from "react";
 import FileUploader from "@/components/FileUploader";
 import OrgChart from "@/components/OrgChart";
 import SalaryTable from "@/components/SalaryTable";
@@ -10,8 +9,6 @@ import { useOrgData } from "@/hooks/useOrgData";
 
 export default function Home() {
   const { orgData, setOrgData, error, loading, processFile, reset } = useOrgData();
-  const chartRef = useRef<HTMLDivElement>(null);
-  const tableRef = useRef<HTMLDivElement>(null);
 
   // Upload page
   if (!orgData) {
@@ -73,7 +70,7 @@ export default function Home() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <PdfExporter data={orgData} chartRef={chartRef} tableRef={tableRef} />
+          <PdfExporter data={orgData} />
           <button
             onClick={reset}
             className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -88,10 +85,7 @@ export default function Home() {
         <h2 className="mb-4 text-sm font-semibold text-gray-500 uppercase tracking-wide">
           Organisation Chart
         </h2>
-        <div
-          ref={chartRef}
-          className="rounded-xl bg-[#F8FAFC] border border-gray-200 p-8"
-        >
+        <div className="rounded-xl bg-[#F8FAFC] border border-gray-200 p-8">
           <OrgChart data={orgData} />
         </div>
       </section>
@@ -101,10 +95,7 @@ export default function Home() {
         <h2 className="mb-4 text-sm font-semibold text-gray-500 uppercase tracking-wide">
           Employee Salary Details
         </h2>
-        <div
-          ref={tableRef}
-          className="rounded-xl bg-white border border-gray-200 p-4"
-        >
+        <div className="rounded-xl bg-white border border-gray-200 p-4">
           <SalaryTable data={orgData} />
         </div>
       </section>
