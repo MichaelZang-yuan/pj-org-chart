@@ -31,39 +31,39 @@ function EmployeeCard({
   return (
     <div
       ref={refCallback}
-      className="rounded-lg overflow-hidden shadow-md"
+      className="rounded-xl overflow-hidden shadow-md"
       style={{
         backgroundColor: isVacant ? "transparent" : color,
         border: isVacant ? `2px dashed ${color}` : "none",
-        minWidth: 180,
-        maxWidth: 220,
+        minWidth: 220,
+        maxWidth: 280,
       }}
     >
-      <div className="px-3 py-2.5">
+      <div className="px-4 py-3.5">
         {isVacant && (
           <span
-            className="inline-block text-[9px] font-bold uppercase tracking-wider rounded px-1.5 py-0.5 mb-1"
+            className="inline-block text-[10px] font-bold uppercase tracking-wider rounded px-2 py-0.5 mb-1.5"
             style={{ backgroundColor: color, color: "#fff", opacity: 0.8 }}
           >
             Vacant
           </span>
         )}
         <p
-          className="font-bold text-sm leading-tight"
-          style={{ color: isVacant ? color : "#fff" }}
+          className="font-bold leading-snug"
+          style={{ color: isVacant ? color : "#fff", fontSize: 16 }}
         >
           {employee.name}
         </p>
         <p
-          className="text-xs mt-0.5 leading-tight"
-          style={{ color: isVacant ? color : "rgba(255,255,255,0.85)" }}
+          className="mt-0.5 leading-snug"
+          style={{ color: isVacant ? color : "rgba(255,255,255,0.85)", fontSize: 14 }}
         >
           {employee.position}
         </p>
         {employee.startDate && (
           <p
-            className="text-[10px] mt-1 leading-tight"
-            style={{ color: isVacant ? "#6B7280" : "rgba(255,255,255,0.7)" }}
+            className="mt-1.5 leading-snug"
+            style={{ color: isVacant ? "#6B7280" : "rgba(255,255,255,0.7)", fontSize: 12 }}
           >
             {employee.startDate}
             {employee.visaStatus ? ` · ${employee.visaStatus}` : ""}
@@ -71,8 +71,8 @@ function EmployeeCard({
         )}
         {salary && (
           <p
-            className="text-[10px] mt-0.5 leading-tight"
-            style={{ color: isVacant ? "#6B7280" : "rgba(255,255,255,0.7)" }}
+            className="mt-0.5 leading-snug"
+            style={{ color: isVacant ? "#6B7280" : "rgba(255,255,255,0.7)", fontSize: 12 }}
           >
             {salary}
             {employee.payFrequency ? ` (${employee.payFrequency})` : ""}
@@ -247,14 +247,14 @@ export default function OrgChart({ data }: OrgChartProps) {
                 {/* Department label */}
                 <div
                   ref={setRef(deptLabelRefs, dept.name) as unknown as React.Ref<HTMLDivElement>}
-                  className="rounded-full px-5 py-1.5 text-white font-bold text-xs shadow-sm tracking-wide"
-                  style={{ backgroundColor: dept.color }}
+                  className="rounded-full px-6 py-2 text-white font-bold shadow-sm tracking-wide"
+                  style={{ fontSize: 14, backgroundColor: dept.color }}
                 >
                   {dept.name}
                 </div>
 
                 {/* Staff grid */}
-                <div className="flex flex-wrap justify-center gap-3" style={{ maxWidth: 480 }}>
+                <div className="flex flex-wrap justify-center gap-4" style={{ maxWidth: 620 }}>
                   {dept.staff.map((emp) => (
                     <EmployeeCard
                       key={emp.name}
@@ -270,10 +270,10 @@ export default function OrgChart({ data }: OrgChartProps) {
             {/* Unassigned managers (functional) */}
             {unassignedManagers.length > 0 && (
               <div className="flex flex-col items-center gap-4">
-                <div className="rounded-full px-5 py-1.5 bg-gray-500 text-white font-bold text-xs shadow-sm tracking-wide">
+                <div className="rounded-full px-6 py-2 bg-gray-500 text-white font-bold shadow-sm tracking-wide" style={{ fontSize: 14 }}>
                   Functional
                 </div>
-                <div className="flex flex-wrap justify-center gap-3">
+                <div className="flex flex-wrap justify-center gap-4">
                   {unassignedManagers.map((mgr) => (
                     <EmployeeCard
                       key={mgr.name}

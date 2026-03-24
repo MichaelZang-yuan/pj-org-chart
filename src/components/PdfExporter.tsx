@@ -48,66 +48,68 @@ function drawCard(
 ) {
   const [cr, cg, cb] = hex(color);
 
+  const PAD = 3; // inner padding
+
   if (emp.vacant) {
     // white fill + dashed colored border
     pdf.setFillColor(255, 255, 255);
     pdf.setDrawColor(cr, cg, cb);
-    pdf.setLineWidth(0.4);
+    pdf.setLineWidth(0.5);
     pdf.setLineDashPattern([1.5, 1.5], 0);
-    pdf.roundedRect(x, y, w, h, 2, 2, "FD");
+    pdf.roundedRect(x, y, w, h, 2.5, 2.5, "FD");
     pdf.setLineDashPattern([], 0);
 
     // "VACANT" badge
     pdf.setFillColor(cr, cg, cb);
-    pdf.roundedRect(x + 2, y + 1.5, 14, 3.8, 1, 1, "F");
+    pdf.roundedRect(x + PAD, y + 2, 16, 4.5, 1, 1, "F");
     pdf.setTextColor(255, 255, 255);
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(4.5);
-    pdf.text("VACANT", x + 3, y + 4);
+    pdf.setFontSize(5.5);
+    pdf.text("VACANT", x + PAD + 1, y + 5);
 
     // name in dept color
     pdf.setTextColor(cr, cg, cb);
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(7);
-    pdf.text(trunc(pdf, emp.name, w - 4), x + 2, y + 9);
+    pdf.setFontSize(10);
+    pdf.text(trunc(pdf, emp.name, w - PAD * 2), x + PAD, y + 12);
 
     pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(5.5);
-    pdf.text(trunc(pdf, emp.position, w - 4), x + 2, y + 13);
+    pdf.setFontSize(8.5);
+    pdf.text(trunc(pdf, emp.position, w - PAD * 2), x + PAD, y + 17);
     return;
   }
 
   // solid coloured card
   pdf.setFillColor(cr, cg, cb);
-  pdf.roundedRect(x, y, w, h, 2, 2, "F");
+  pdf.roundedRect(x, y, w, h, 2.5, 2.5, "F");
 
-  let ty = y + 5;
+  let ty = y + 6.5;
 
-  // name
+  // name — 10pt bold (maps to 16px on screen)
   pdf.setTextColor(255, 255, 255);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(7);
-  pdf.text(trunc(pdf, emp.name, w - 4), x + 2, ty);
-  ty += 3.8;
+  pdf.setFontSize(10);
+  pdf.text(trunc(pdf, emp.name, w - PAD * 2), x + PAD, ty);
+  ty += 5;
 
-  // position
+  // position — 8.5pt (maps to 14px on screen)
   pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(5.5);
+  pdf.setFontSize(8.5);
   pdf.setTextColor(230, 235, 245);
-  pdf.text(trunc(pdf, emp.position, w - 4), x + 2, ty);
-  ty += 3.2;
+  pdf.text(trunc(pdf, emp.position, w - PAD * 2), x + PAD, ty);
+  ty += 4.5;
 
-  // start date + visa
+  // start date + visa — 7pt (maps to 12px on screen)
   let info = emp.startDate || "";
   if (emp.visaStatus) info += (info ? " \u00b7 " : "") + emp.visaStatus;
   if (info) {
-    pdf.setFontSize(4.8);
+    pdf.setFontSize(7);
     pdf.setTextColor(210, 220, 235);
-    pdf.text(trunc(pdf, info, w - 4), x + 2, ty);
-    ty += 3;
+    pdf.text(trunc(pdf, info, w - PAD * 2), x + PAD, ty);
+    ty += 4;
   }
 
-  // salary
+  // salary — 7pt (maps to 12px on screen)
   const sal = emp.annualSalary
     ? `$${emp.annualSalary.toLocaleString()}/yr`
     : emp.hourlyRate
@@ -116,9 +118,9 @@ function drawCard(
   if (sal) {
     let line = sal;
     if (emp.payFrequency) line += ` (${emp.payFrequency})`;
-    pdf.setFontSize(4.8);
+    pdf.setFontSize(7);
     pdf.setTextColor(210, 220, 235);
-    pdf.text(trunc(pdf, line, w - 4), x + 2, ty);
+    pdf.text(trunc(pdf, line, w - PAD * 2), x + PAD, ty);
   }
 }
 
@@ -192,33 +194,33 @@ export default function PdfExporter({ data }: PdfExporterProps) {
         `Organisation Chart \u2014 As at ${data.asAtDate}`
       );
 
-      // sizing constants
-      const DIR_W = 68,
-        DIR_H = 30;
-      const MGR_W = 58,
-        MGR_H = 26;
+      // sizing constants (enlarged to match 16/14/12px web fonts)
+      const DIR_W = 82,
+        DIR_H = 38;
+      const MGR_W = 72,
+        MGR_H = 34;
       const GAP_V = 14;
-      const GAP_H = 6;
+      const GAP_H = 7;
 
       // adaptive staff card sizing based on department count
       const deptCount = data.departments.length;
       let STAFF_W: number, MAX_PER_ROW: number, DEPT_GAP: number;
       if (deptCount <= 2) {
-        STAFF_W = 50;
+        STAFF_W = 64;
         MAX_PER_ROW = 4;
         DEPT_GAP = 14;
       } else if (deptCount <= 4) {
-        STAFF_W = 44;
+        STAFF_W = 56;
         MAX_PER_ROW = 3;
         DEPT_GAP = 10;
       } else {
-        STAFF_W = 38;
+        STAFF_W = 48;
         MAX_PER_ROW = 2;
         DEPT_GAP = 8;
       }
-      const STAFF_H = 22;
-      const STAFF_GAP = 3;
-      const LABEL_H = 8;
+      const STAFF_H = 30;
+      const STAFF_GAP = 4;
+      const LABEL_H = 10;
 
       let curY = HEADER_H + 6;
 
@@ -288,15 +290,15 @@ export default function PdfExporter({ data }: PdfExporterProps) {
         for (const { dept, colW, rows } of layouts) {
           const cx = deptX + colW / 2;
 
-          // pill label
+          // pill label — 8.5pt bold (maps to 14px on screen)
           pdf.setFont("helvetica", "bold");
-          pdf.setFontSize(6.5);
-          const lw = Math.max(pdf.getTextWidth(dept.name) + 10, 22);
+          pdf.setFontSize(8.5);
+          const lw = Math.max(pdf.getTextWidth(dept.name) + 14, 28);
           const lx = cx - lw / 2;
           pdf.setFillColor(...hex(dept.color));
-          pdf.roundedRect(lx, labelY, lw, LABEL_H, 4, 4, "F");
+          pdf.roundedRect(lx, labelY, lw, LABEL_H, 5, 5, "F");
           pdf.setTextColor(255, 255, 255);
-          pdf.text(dept.name, cx, labelY + 5.5, { align: "center" });
+          pdf.text(dept.name, cx, labelY + 7, { align: "center" });
 
           // manager → label line
           if (dept.manager) {
