@@ -1,81 +1,93 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
-import { OrgData, Employee, DepartmentGroup, DIRECTOR_COLOR, MANAGER_COLOR } from "@/lib/types";
+import {
+  OrgData,
+  Employee,
+  DepartmentGroup,
+  DIRECTOR_COLOR,
+  MANAGER_COLOR,
+} from "@/lib/types";
 
-interface OrgChartProps {
-  data: OrgData;
-}
+/*
+ * Pure CSS org chart tree.
+ * Uses <ul>/<li> + CSS border lines. No SVG, no refs, no JS coordinates.
+ * Lines are drawn with ::before / ::after on <li> elements.
+ * html2canvas captures these perfectly because they are normal DOM/CSS.
+ *
+ * Technique: each <li> in a row draws:
+ *   ::before  — horizontal line on the left half  (border-bottom)
+ *   ::after   — horizontal line on the right half (border-bottom)
+ *   first-child  hides ::before  (no line to the left)
+ *   last-child   hides ::after   (no line to the right)
+ *   only-child   hides both (just vertical stem)
+ *
+ * The vertical stem (parent ↓ child) is a border-left on a zero-width
+ * div sitting between the card and the horizontal bar.
+ */
 
-interface Pos {
-  x: number;
-  y: number;
-}
+// ── styles (CSS-in-JS, inline) ──────────────────────────────────────────────
 
-function EmployeeCard({
-  employee,
-  color,
-  refCallback,
-}: {
-  employee: Employee;
-  color: string;
-  refCallback?: (el: HTMLDivElement | null) => void;
-}) {
-  const isVacant = employee.vacant;
-  const salary = employee.annualSalary
-    ? `$${employee.annualSalary.toLocaleString()}/yr`
-    : employee.hourlyRate
-      ? `$${employee.hourlyRate.toFixed(2)}/hr`
+const LINE_COLOR = "#94A3B8";
+const LINE_W = 2;
+const STEM_H = 20;
+
+// ── Card ─────────────────────────────────────────────────────────────────────
+
+function Card({ emp, color }: { emp: Employee; color: string }) {
+  const v = emp.vacant;
+  const sal = emp.annualSalary
+    ? `$${emp.annualSalary.toLocaleString()}/yr`
+    : emp.hourlyRate
+      ? `$${emp.hourlyRate.toFixed(2)}/hr`
       : "";
 
   return (
     <div
-      ref={refCallback}
       className="rounded-xl overflow-hidden shadow-md"
       style={{
-        backgroundColor: isVacant ? "transparent" : color,
-        border: isVacant ? `2px dashed ${color}` : "none",
-        minWidth: 220,
-        maxWidth: 280,
+        backgroundColor: v ? "transparent" : color,
+        border: v ? `2px dashed ${color}` : "none",
+        minWidth: 200,
+        maxWidth: 260,
+        display: "inline-block",
       }}
     >
-      <div className="px-4 py-3.5">
-        {isVacant && (
+      <div style={{ padding: "12px 16px" }}>
+        {v && (
           <span
-            className="inline-block text-[10px] font-bold uppercase tracking-wider rounded px-2 py-0.5 mb-1.5"
-            style={{ backgroundColor: color, color: "#fff", opacity: 0.8 }}
+            style={{
+              display: "inline-block",
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              borderRadius: 4,
+              padding: "2px 8px",
+              marginBottom: 6,
+              backgroundColor: color,
+              color: "#fff",
+              opacity: 0.8,
+            }}
           >
             Vacant
           </span>
         )}
-        <p
-          className="font-bold leading-snug"
-          style={{ color: isVacant ? color : "#fff", fontSize: 16 }}
-        >
-          {employee.name}
+        <p style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.3, color: v ? color : "#fff" }}>
+          {emp.name}
         </p>
-        <p
-          className="mt-0.5 leading-snug"
-          style={{ color: isVacant ? color : "rgba(255,255,255,0.85)", fontSize: 14 }}
-        >
-          {employee.position}
+        <p style={{ fontSize: 14, lineHeight: 1.3, marginTop: 2, color: v ? color : "rgba(255,255,255,0.85)" }}>
+          {emp.position}
         </p>
-        {employee.startDate && (
-          <p
-            className="mt-1.5 leading-snug"
-            style={{ color: isVacant ? "#6B7280" : "rgba(255,255,255,0.7)", fontSize: 12 }}
-          >
-            {employee.startDate}
-            {employee.visaStatus ? ` · ${employee.visaStatus}` : ""}
+        {emp.startDate && (
+          <p style={{ fontSize: 12, lineHeight: 1.3, marginTop: 6, color: v ? "#6B7280" : "rgba(255,255,255,0.7)" }}>
+            {emp.startDate}
+            {emp.visaStatus ? ` · ${emp.visaStatus}` : ""}
           </p>
         )}
-        {salary && (
-          <p
-            className="mt-0.5 leading-snug"
-            style={{ color: isVacant ? "#6B7280" : "rgba(255,255,255,0.7)", fontSize: 12 }}
-          >
-            {salary}
-            {employee.payFrequency ? ` (${employee.payFrequency})` : ""}
+        {sal && (
+          <p style={{ fontSize: 12, lineHeight: 1.3, marginTop: 2, color: v ? "#6B7280" : "rgba(255,255,255,0.7)" }}>
+            {sal}
+            {emp.payFrequency ? ` (${emp.payFrequency})` : ""}
           </p>
         )}
       </div>
@@ -83,210 +95,274 @@ function EmployeeCard({
   );
 }
 
-export default function OrgChart({ data }: OrgChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [lines, setLines] = useState<string[]>([]);
+// ── Dept label pill ──────────────────────────────────────────────────────────
 
-  // Refs for SVG line drawing
-  const directorRef = useRef<HTMLDivElement>(null);
-  const managerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const deptLabelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const staffRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-
-  const setRef = useCallback(
-    (map: React.MutableRefObject<Map<string, HTMLDivElement>>, key: string) =>
-      (el: HTMLDivElement | null) => {
-        if (el) map.current.set(key, el);
-        else map.current.delete(key);
-      },
-    []
+function DeptPill({ dept }: { dept: DepartmentGroup }) {
+  return (
+    <div
+      style={{
+        display: "inline-block",
+        borderRadius: 999,
+        padding: "6px 20px",
+        backgroundColor: dept.color,
+        color: "#fff",
+        fontWeight: 700,
+        fontSize: 14,
+        boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+        letterSpacing: "0.02em",
+      }}
+    >
+      {dept.name}
+    </div>
   );
+}
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!containerRef.current) return;
-      const cRect = containerRef.current.getBoundingClientRect();
-      const paths: string[] = [];
+// ── Tree node wrapper ────────────────────────────────────────────────────────
+// Wraps a card (or any content) and optionally draws children below it
+// with pure CSS connector lines.
 
-      const rel = (el: HTMLElement): DOMRect => {
-        const r = el.getBoundingClientRect();
-        return new DOMRect(
-          r.left - cRect.left,
-          r.top - cRect.top,
-          r.width,
-          r.height
-        );
-      };
-
-      const bottomCenter = (r: DOMRect): Pos => ({
-        x: r.x + r.width / 2,
-        y: r.y + r.height,
-      });
-      const topCenter = (r: DOMRect): Pos => ({
-        x: r.x + r.width / 2,
-        y: r.y,
-      });
-
-      // L-shape: vertical down from parent, horizontal, vertical down to child
-      const lPath = (from: Pos, to: Pos): string => {
-        const midY = from.y + (to.y - from.y) / 2;
-        return `M ${from.x} ${from.y} L ${from.x} ${midY} L ${to.x} ${midY} L ${to.x} ${to.y}`;
-      };
-
-      // Director → Managers
-      if (directorRef.current && managerRefs.current.size > 0) {
-        const dRect = rel(directorRef.current);
-        const from = bottomCenter(dRect);
-        managerRefs.current.forEach((el) => {
-          const to = topCenter(rel(el));
-          paths.push(lPath(from, to));
-        });
-      }
-
-      // Build manager→department mapping from actual department manager data
-      const managerDeptMap = new Map<string, string[]>();
-      for (const dept of data.departments) {
-        if (dept.manager) {
-          const existing = managerDeptMap.get(dept.manager.name) || [];
-          existing.push(dept.name);
-          managerDeptMap.set(dept.manager.name, existing);
-        }
-      }
-
-      // Managers → Department labels
-      for (const [mgrName, deptNames] of managerDeptMap) {
-        const mgrEl = managerRefs.current.get(mgrName);
-        if (!mgrEl) continue;
-        const from = bottomCenter(rel(mgrEl));
-        for (const deptName of deptNames) {
-          const deptEl = deptLabelRefs.current.get(deptName);
-          if (!deptEl) continue;
-          const to = topCenter(rel(deptEl));
-          paths.push(lPath(from, to));
-        }
-      }
-
-      // Department labels → Staff cards
-      for (const dept of data.departments) {
-        const deptEl = deptLabelRefs.current.get(dept.name);
-        if (!deptEl) continue;
-        const from = bottomCenter(rel(deptEl));
-        for (const emp of dept.staff) {
-          const staffEl = staffRefs.current.get(`${dept.name}-${emp.name}`);
-          if (!staffEl) continue;
-          const to = topCenter(rel(staffEl));
-          paths.push(lPath(from, to));
-        }
-      }
-
-      setLines(paths);
-    }, 150);
-
-    return () => clearTimeout(timer);
-  }, [data]);
-
-  // Identify managers not assigned to any department
-  const assignedManagerNames = new Set<string>();
-  for (const dept of data.departments) {
-    if (dept.manager) assignedManagerNames.add(dept.manager.name);
-  }
-  const unassignedManagers = data.managers.filter(
-    (m) => !assignedManagerNames.has(m.name)
-  );
+function TreeNode({
+  children,
+  childNodes,
+}: {
+  children: React.ReactNode; // the card / label
+  childNodes?: React.ReactNode[]; // child TreeNodes
+}) {
+  const hasChildren = childNodes && childNodes.length > 0;
 
   return (
-    <div ref={containerRef} className="relative w-full" style={{ minHeight: 400 }}>
-      {/* SVG lines */}
-      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
-        {lines.map((d, i) => (
-          <path
-            key={i}
-            d={d}
-            fill="none"
-            stroke="#94A3B8"
-            strokeWidth="1.5"
-            strokeLinecap="round"
+    <li
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        position: "relative",
+        padding: `0 ${hasChildren ? 8 : 6}px`,
+        listStyle: "none",
+      }}
+    >
+      {/* The card / label itself */}
+      {children}
+
+      {/* Children branch */}
+      {hasChildren && (
+        <>
+          {/* Vertical stem DOWN from this node to the horizontal bar */}
+          <div
+            style={{
+              width: 0,
+              height: STEM_H,
+              borderLeft: `${LINE_W}px solid ${LINE_COLOR}`,
+            }}
           />
-        ))}
-      </svg>
 
-      {/* Content layers */}
-      <div className="relative flex flex-col items-center gap-10" style={{ zIndex: 1 }}>
-        {/* Level 0: Director */}
-        {data.director && (
-          <div className="flex justify-center">
-            <EmployeeCard
-              employee={data.director}
-              color={DIRECTOR_COLOR}
-              refCallback={(el) => {
-                (directorRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
-              }}
-            />
-          </div>
-        )}
+          {/* Children row */}
+          <ul
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              padding: 0,
+              margin: 0,
+              listStyle: "none",
+              position: "relative",
+            }}
+          >
+            {childNodes!.map((child, i) => {
+              const count = childNodes!.length;
+              const isFirst = i === 0;
+              const isLast = i === count - 1;
+              const isOnly = count === 1;
 
-        {/* Level 1: Managers */}
-        {data.managers.length > 0 && (
-          <div className="flex flex-wrap justify-center gap-5">
-            {data.managers.map((mgr) => (
-              <EmployeeCard
-                key={mgr.name}
-                employee={mgr}
-                color={MANAGER_COLOR}
-                refCallback={setRef(managerRefs, mgr.name)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Level 2: Departments */}
-        {data.departments.length > 0 && (
-          <div className="flex flex-wrap justify-center gap-10 items-start">
-            {data.departments.map((dept) => (
-              <div key={dept.name} className="flex flex-col items-center gap-4">
-                {/* Department label */}
-                <div
-                  ref={setRef(deptLabelRefs, dept.name) as unknown as React.Ref<HTMLDivElement>}
-                  className="rounded-full px-6 py-2 text-white font-bold shadow-sm tracking-wide"
-                  style={{ fontSize: 14, backgroundColor: dept.color }}
+              return (
+                <li
+                  key={i}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    position: "relative",
+                    padding: "0 8px",
+                    listStyle: "none",
+                  }}
                 >
-                  {dept.name}
-                </div>
-
-                {/* Staff grid */}
-                <div className="flex flex-wrap justify-center gap-4" style={{ maxWidth: 620 }}>
-                  {dept.staff.map((emp) => (
-                    <EmployeeCard
-                      key={emp.name}
-                      employee={emp}
-                      color={dept.color}
-                      refCallback={setRef(staffRefs, `${dept.name}-${emp.name}`)}
+                  {/* Horizontal connector bar across siblings */}
+                  {/* Each <li> draws its portion of the horizontal line at the top */}
+                  {!isOnly && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: isFirst ? "50%" : 0,
+                        right: isLast ? "50%" : 0,
+                        height: 0,
+                        borderTop: `${LINE_W}px solid ${LINE_COLOR}`,
+                      }}
                     />
-                  ))}
-                </div>
-              </div>
-            ))}
+                  )}
 
-            {/* Unassigned managers (functional) */}
-            {unassignedManagers.length > 0 && (
-              <div className="flex flex-col items-center gap-4">
-                <div className="rounded-full px-6 py-2 bg-gray-500 text-white font-bold shadow-sm tracking-wide" style={{ fontSize: 14 }}>
-                  Functional
-                </div>
-                <div className="flex flex-wrap justify-center gap-4">
-                  {unassignedManagers.map((mgr) => (
-                    <EmployeeCard
-                      key={mgr.name}
-                      employee={mgr}
-                      color="#6B7280"
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+                  {/* Vertical stem UP from horizontal bar to this child */}
+                  <div
+                    style={{
+                      width: 0,
+                      height: STEM_H,
+                      borderLeft: `${LINE_W}px solid ${LINE_COLOR}`,
+                    }}
+                  />
+
+                  {/* The child content */}
+                  {child}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </li>
+  );
+}
+
+// ── Main OrgChart ───────────────────────────────────────────────────────────
+
+export default function OrgChart({ data }: { data: OrgData }) {
+  // Build manager → departments mapping
+  const mgrToDepts = new Map<string, DepartmentGroup[]>();
+  for (const dept of data.departments) {
+    if (dept.manager) {
+      const arr = mgrToDepts.get(dept.manager.name) || [];
+      arr.push(dept);
+      mgrToDepts.set(dept.manager.name, arr);
+    }
+  }
+  const assignedDeptNames = new Set(
+    data.departments.filter((d) => d.manager).map((d) => d.name)
+  );
+  const unassignedDepts = data.departments.filter(
+    (d) => !assignedDeptNames.has(d.name)
+  );
+
+  // Build staff sub-trees for a department
+  function buildStaffChildren(dept: DepartmentGroup) {
+    if (dept.staff.length === 0) return undefined;
+    // Chunk staff into rows of 4 max to avoid excessive width
+    const MAX = 4;
+    if (dept.staff.length <= MAX) {
+      return dept.staff.map((e) => (
+        <TreeNode key={e.name}>
+          <Card emp={e} color={dept.color} />
+        </TreeNode>
+      ));
+    }
+    // More than MAX: show first row as fan-out, remaining as grid rows below
+    // We'll just use a simple grid wrapped in a single child node
+    return [
+      <li
+        key="grid"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          listStyle: "none",
+          padding: "0 8px",
+          position: "relative",
+        }}
+      >
+        {/* Vertical stem */}
+        <div
+          style={{
+            width: 0,
+            height: STEM_H,
+            borderLeft: `${LINE_W}px solid ${LINE_COLOR}`,
+          }}
+        />
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            gap: 12,
+            maxWidth: MAX * 272,
+          }}
+        >
+          {dept.staff.map((e) => (
+            <Card key={e.name} emp={e} color={dept.color} />
+          ))}
+        </div>
+      </li>,
+    ];
+  }
+
+  // Build department sub-trees for a manager
+  function buildDeptChildren(mgr: Employee) {
+    const depts = mgrToDepts.get(mgr.name);
+    if (!depts || depts.length === 0) return undefined;
+    return depts.map((dept) => (
+      <TreeNode key={dept.name} childNodes={buildStaffChildren(dept)}>
+        <DeptPill dept={dept} />
+      </TreeNode>
+    ));
+  }
+
+  // Build manager sub-trees
+  const managerChildren =
+    data.managers.length > 0
+      ? data.managers.map((mgr) => (
+          <TreeNode key={mgr.name} childNodes={buildDeptChildren(mgr)}>
+            <Card emp={mgr} color={MANAGER_COLOR} />
+          </TreeNode>
+        ))
+      : undefined;
+
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <ul
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          padding: 0,
+          margin: 0,
+          listStyle: "none",
+        }}
+      >
+        {/* Root: Director */}
+        {data.director ? (
+          <TreeNode childNodes={managerChildren}>
+            <Card emp={data.director} color={DIRECTOR_COLOR} />
+          </TreeNode>
+        ) : (
+          // No director — show managers as top level
+          managerChildren
         )}
-      </div>
+      </ul>
+
+      {/* Unassigned departments (not under any manager) */}
+      {unassignedDepts.length > 0 && (
+        <div
+          style={{
+            marginTop: 32,
+            display: "flex",
+            justifyContent: "center",
+            gap: 40,
+            flexWrap: "wrap",
+          }}
+        >
+          {unassignedDepts.map((dept) => (
+            <ul
+              key={dept.name}
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                padding: 0,
+                margin: 0,
+                listStyle: "none",
+              }}
+            >
+              <TreeNode childNodes={buildStaffChildren(dept)}>
+                <DeptPill dept={dept} />
+              </TreeNode>
+            </ul>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
