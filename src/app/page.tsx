@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import FileUploader from "@/components/FileUploader";
 import OrgChart from "@/components/OrgChart";
 import SalaryTable from "@/components/SalaryTable";
@@ -9,13 +10,14 @@ import { useOrgData } from "@/hooks/useOrgData";
 
 export default function Home() {
   const { orgData, setOrgData, error, loading, processFile, reset } = useOrgData();
+  const chartRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
 
   // Upload page
   if (!orgData) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-[#F8FAFC] px-4">
         <div className="w-full max-w-xl">
-          {/* Logo/Title */}
           <div className="mb-8 text-center">
             <h1 className="text-3xl font-bold text-[#1E3A5F]">
               PJ Org Chart Generator
@@ -26,17 +28,14 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Upload area */}
           <FileUploader onFile={processFile} loading={loading} />
 
-          {/* Error */}
           {error && (
             <div className="mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
           )}
 
-          {/* Instructions */}
           <div className="mt-8 rounded-lg bg-white border border-gray-200 px-6 py-5">
             <h2 className="text-sm font-semibold text-gray-700">
               Expected Excel Format
@@ -70,7 +69,7 @@ export default function Home() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <PdfExporter data={orgData} />
+          <PdfExporter data={orgData} chartRef={chartRef} tableRef={tableRef} />
           <button
             onClick={reset}
             className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -85,7 +84,10 @@ export default function Home() {
         <h2 className="mb-4 text-sm font-semibold text-gray-500 uppercase tracking-wide">
           Organisation Chart
         </h2>
-        <div className="rounded-xl bg-[#F8FAFC] border border-gray-200 p-8">
+        <div
+          ref={chartRef}
+          className="rounded-xl bg-[#F8FAFC] border border-gray-200 p-8"
+        >
           <OrgChart data={orgData} />
         </div>
       </section>
@@ -95,7 +97,10 @@ export default function Home() {
         <h2 className="mb-4 text-sm font-semibold text-gray-500 uppercase tracking-wide">
           Employee Salary Details
         </h2>
-        <div className="rounded-xl bg-white border border-gray-200 p-4">
+        <div
+          ref={tableRef}
+          className="rounded-xl bg-white border border-gray-200 p-4"
+        >
           <SalaryTable data={orgData} />
         </div>
       </section>

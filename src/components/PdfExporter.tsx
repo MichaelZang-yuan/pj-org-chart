@@ -1,230 +1,93 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import {
-  OrgData,
-  Employee,
-  DepartmentGroup,
-  DIRECTOR_COLOR,
-  MANAGER_COLOR,
-} from "@/lib/types";
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { OrgData } from "@/lib/types";
 
 interface PdfExporterProps {
   data: OrgData;
+  chartRef: React.RefObject<HTMLDivElement | null>;
+  tableRef: React.RefObject<HTMLDivElement | null>;
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-function hex(c: string): [number, number, number] {
-  const h = c.replace("#", "");
-  return [
-    parseInt(h.substring(0, 2), 16),
-    parseInt(h.substring(2, 4), 16),
-    parseInt(h.substring(4, 6), 16),
-  ];
-}
-
-function trunc(pdf: any, text: string, maxW: number): string {
-  if (!text) return "";
-  if (pdf.getTextWidth(text) <= maxW) return text;
-  while (text.length > 1 && pdf.getTextWidth(text + "\u2026") > maxW)
-    text = text.slice(0, -1);
-  return text + "\u2026";
-}
-
-// ── card drawing ─────────────────────────────────────────────────────────────
-
-function drawCard(
-  pdf: any,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  emp: Employee,
-  color: string,
-) {
-  const [cr, cg, cb] = hex(color);
-  const PAD = 3;
-
-  if (emp.vacant) {
-    pdf.setFillColor(255, 255, 255);
-    pdf.setDrawColor(cr, cg, cb);
-    pdf.setLineWidth(0.5);
-    pdf.setLineDashPattern([1.5, 1.5], 0);
-    pdf.roundedRect(x, y, w, h, 2.5, 2.5, "FD");
-    pdf.setLineDashPattern([], 0);
-
-    pdf.setFillColor(cr, cg, cb);
-    pdf.roundedRect(x + PAD, y + 2, 16, 4.5, 1, 1, "F");
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(5.5);
-    pdf.text("VACANT", x + PAD + 1, y + 5);
-
-    pdf.setTextColor(cr, cg, cb);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(10);
-    pdf.text(trunc(pdf, emp.name, w - PAD * 2), x + PAD, y + 12);
-
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(8.5);
-    pdf.text(trunc(pdf, emp.position, w - PAD * 2), x + PAD, y + 17);
-    return;
-  }
-
-  pdf.setFillColor(cr, cg, cb);
-  pdf.roundedRect(x, y, w, h, 2.5, 2.5, "F");
-
-  let ty = y + 6.5;
-
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(10);
-  pdf.text(trunc(pdf, emp.name, w - PAD * 2), x + PAD, ty);
-  ty += 5;
-
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(8.5);
-  pdf.setTextColor(230, 235, 245);
-  pdf.text(trunc(pdf, emp.position, w - PAD * 2), x + PAD, ty);
-  ty += 4.5;
-
-  let info = emp.startDate || "";
-  if (emp.visaStatus) info += (info ? " \u00b7 " : "") + emp.visaStatus;
-  if (info) {
-    pdf.setFontSize(7);
-    pdf.setTextColor(210, 220, 235);
-    pdf.text(trunc(pdf, info, w - PAD * 2), x + PAD, ty);
-    ty += 4;
-  }
-
-  const sal = emp.annualSalary
-    ? `$${emp.annualSalary.toLocaleString()}/yr`
-    : emp.hourlyRate
-      ? `$${emp.hourlyRate.toFixed(2)}/hr`
-      : "";
-  if (sal) {
-    let line = sal;
-    if (emp.payFrequency) line += ` (${emp.payFrequency})`;
-    pdf.setFontSize(7);
-    pdf.setTextColor(210, 220, 235);
-    pdf.text(trunc(pdf, line, w - PAD * 2), x + PAD, ty);
-  }
-}
-
-function drawL(pdf: any, x1: number, y1: number, x2: number, y2: number) {
-  const midY = y1 + (y2 - y1) / 2;
-  pdf.setDrawColor(148, 163, 184);
-  pdf.setLineWidth(0.35);
-  pdf.setLineDashPattern([], 0);
-  pdf.line(x1, y1, x1, midY);
-  pdf.line(x1, midY, x2, midY);
-  pdf.line(x2, midY, x2, y2);
-}
-
-// ── main component ──────────────────────────────────────────────────────────
-
-export default function PdfExporter({ data }: PdfExporterProps) {
+export default function PdfExporter({
+  data,
+  chartRef,
+  tableRef,
+}: PdfExporterProps) {
   const [exporting, setExporting] = useState(false);
 
   const exportPdf = useCallback(async () => {
+    if (!chartRef.current || !tableRef.current) {
+      console.error("[PDF] chart or table ref not found");
+      return;
+    }
     setExporting(true);
+
     try {
+      const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
 
-      // ── constants ──
-      const MARGIN = 20;
+      const A3_W = 420;
+      const A3_H = 297;
+      const MARGIN = 15;
       const HEADER_H = 25;
-      const FOOTER_H = 14;
-      const DIR_W = 82, DIR_H = 38;
-      const MGR_W = 72, MGR_H = 34;
-      const STAFF_W = 62, STAFF_H = 30;
-      const GAP_V = 18;
-      const GAP_H = 10;
-      const STAFF_GAP_H = 6;
-      const STAFF_GAP_V = 6;
-      const LABEL_H = 12;
-      const LABEL_TO_STAFF = 12;
-      const MAX_PER_ROW = 3;
-      const DEPT_GAP = 16;
+      const FOOTER_H = 15;
 
-      // ══════════════════════════════════════════════════════════════════
-      // STEP 1: Calculate the exact content size needed
-      // Departments are stacked VERTICALLY — each gets its own band.
-      // Height = SUM of all department heights, not just the tallest.
-      // ══════════════════════════════════════════════════════════════════
+      // ── Capture chart ──
+      console.log("[PDF] Capturing org chart...");
+      const chartCanvas = await html2canvas(chartRef.current, {
+        scale: 2,
+        backgroundColor: "#F8FAFC",
+        useCORS: true,
+        logging: false,
+        windowWidth: chartRef.current.scrollWidth,
+        windowHeight: chartRef.current.scrollHeight,
+      });
+      console.log("[PDF] Chart captured:", chartCanvas.width, "x", chartCanvas.height);
 
-      const tmp = new jsPDF({ unit: "mm", orientation: "l", format: "a4" });
+      // ── Capture table ──
+      console.log("[PDF] Capturing salary table...");
+      const tableCanvas = await html2canvas(tableRef.current, {
+        scale: 2,
+        backgroundColor: "#FFFFFF",
+        useCORS: true,
+        logging: false,
+        windowWidth: tableRef.current.scrollWidth,
+        windowHeight: tableRef.current.scrollHeight,
+      });
+      console.log("[PDF] Table captured:", tableCanvas.width, "x", tableCanvas.height);
 
-      interface DeptLayout {
-        dept: DepartmentGroup;
-        labelW: number;
-        staffRowW: number;
-        rows: Employee[][];
-        bandH: number; // total height for this dept band (label + staff rows)
-      }
-      const deptLayouts: DeptLayout[] = [];
+      // ── Determine page size ──
+      // Scale chart to fit width, then see if height exceeds A3
+      const contentW = A3_W - MARGIN * 2;
+      const contentMaxH = A3_H - HEADER_H - FOOTER_H - 10;
 
-      for (const dept of data.departments) {
-        tmp.setFont("helvetica", "bold");
-        tmp.setFontSize(8.5);
-        const labelW = tmp.getTextWidth(dept.name) + 18;
+      const chartAspect = chartCanvas.width / chartCanvas.height;
+      let chartImgW = contentW;
+      let chartImgH = chartImgW / chartAspect;
 
-        const rows: Employee[][] = [];
-        for (let i = 0; i < dept.staff.length; i += MAX_PER_ROW) {
-          rows.push(dept.staff.slice(i, i + MAX_PER_ROW));
-        }
+      // If chart is taller than A3 content area, use a taller page
+      const page1H = Math.max(A3_H, HEADER_H + 5 + chartImgH + 5 + FOOTER_H);
 
-        const numCols = Math.min(dept.staff.length || 1, MAX_PER_ROW);
-        const staffRowW = numCols * (STAFF_W + STAFF_GAP_H) - STAFF_GAP_H;
+      const tableAspect = tableCanvas.width / tableCanvas.height;
+      let tableImgW = contentW;
+      let tableImgH = tableImgW / tableAspect;
+      const page2H = Math.max(A3_H, HEADER_H + 5 + tableImgH + 5 + FOOTER_H);
 
-        const staffTotalH = rows.length > 0
-          ? rows.length * STAFF_H + (rows.length - 1) * STAFF_GAP_V
-          : 0;
-        const bandH = LABEL_H + LABEL_TO_STAFF + staffTotalH;
+      console.log(`[PDF] Page 1: ${A3_W}x${page1H.toFixed(0)}mm, chart img: ${chartImgW.toFixed(0)}x${chartImgH.toFixed(0)}mm`);
+      console.log(`[PDF] Page 2: ${A3_W}x${page2H.toFixed(0)}mm, table img: ${tableImgW.toFixed(0)}x${tableImgH.toFixed(0)}mm`);
 
-        deptLayouts.push({ dept, labelW, staffRowW, rows, bandH });
-      }
+      // ── Create PDF ──
+      const pdf = new jsPDF({
+        unit: "mm",
+        orientation: "l",
+        format: [page1H, A3_W],
+      });
 
-      // --- Width: widest row across all levels ---
-      const dirRowW = DIR_W;
-      const mgrRowW = data.managers.length > 0
-        ? data.managers.length * MGR_W + (data.managers.length - 1) * GAP_H
-        : 0;
-      const deptMaxRowW = deptLayouts.length > 0
-        ? Math.max(...deptLayouts.map((d) => Math.max(d.labelW, d.staffRowW)))
-        : 0;
-      const maxContentW = Math.max(dirRowW, mgrRowW, deptMaxRowW);
-
-      // --- Height: SUM of all department bands ---
-      const allDeptsH = deptLayouts.length > 0
-        ? deptLayouts.reduce((s, d) => s + d.bandH, 0) + (deptLayouts.length - 1) * GAP_V
-        : 0;
-
-      let contentH = 0;
-      if (data.director) contentH += DIR_H + GAP_V;
-      if (data.managers.length > 0) contentH += MGR_H + GAP_V;
-      contentH += allDeptsH;
-
-      const PAGE_W = Math.max(420, maxContentW + MARGIN * 2);
-      const PAGE_H = Math.max(297, HEADER_H + 12 + contentH + 12 + FOOTER_H);
-
-      console.log(`[PDF] Page 1 size: ${PAGE_W.toFixed(0)}×${PAGE_H.toFixed(0)}mm`);
-      console.log(`[PDF] Content widths — Dir: ${dirRowW}, Mgr: ${mgrRowW.toFixed(0)}, DeptMaxRow: ${deptMaxRowW.toFixed(0)}`);
-      console.log(`[PDF] Content height: ${contentH.toFixed(0)}mm (allDeptsH=${allDeptsH.toFixed(0)})`);
-
-      // ══════════════════════════════════════════════════════════════════
-      // STEP 2: Create PDF and draw Page 1 — Org Chart
-      // ══════════════════════════════════════════════════════════════════
-
-      // CRITICAL: orientation "l" (landscape) ensures PAGE_W is the page width
-      const pdf = new jsPDF({ unit: "mm", orientation: "l", format: [PAGE_H, PAGE_W] });
-
+      // ── Page 1: Org Chart ──
       // Header
-      pdf.setFillColor(...hex("#1E3A5F"));
-      pdf.rect(0, 0, PAGE_W, HEADER_H, "F");
+      pdf.setFillColor(30, 58, 95);
+      pdf.rect(0, 0, A3_W, HEADER_H, "F");
       pdf.setTextColor(255, 255, 255);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(16);
@@ -233,159 +96,27 @@ export default function PdfExporter({ data }: PdfExporterProps) {
       pdf.setFontSize(10);
       pdf.text(`Organisation Chart \u2014 As at ${data.asAtDate}`, MARGIN, 20);
 
-      let curY = HEADER_H + 10;
-      let drawnCount = 0;
-
-      // ── Director ──
-      let dirCX = PAGE_W / 2;
-      if (data.director) {
-        const dx = (PAGE_W - DIR_W) / 2;
-        drawCard(pdf, dx, curY, DIR_W, DIR_H, data.director, DIRECTOR_COLOR);
-        dirCX = dx + DIR_W / 2;
-        drawnCount++;
-        console.log(`[PDF] Drew director: ${data.director.name} at x=${dx.toFixed(0)}`);
-      }
-      const dirBottomY = curY + DIR_H;
-      curY = dirBottomY + GAP_V;
-
-      // ── Managers ──
-      interface MgrPos { cx: number; name: string }
-      const mgrPos: MgrPos[] = [];
-
-      if (data.managers.length > 0) {
-        const startX = (PAGE_W - mgrRowW) / 2;
-        let mx = startX;
-
-        for (let i = 0; i < data.managers.length; i++) {
-          const mgr = data.managers[i];
-          drawCard(pdf, mx, curY, MGR_W, MGR_H, mgr, MANAGER_COLOR);
-          const cx = mx + MGR_W / 2;
-          mgrPos.push({ cx, name: mgr.name });
-          drawnCount++;
-          console.log(`[PDF] Drew manager ${i + 1}/${data.managers.length}: ${mgr.name} at x=${mx.toFixed(0)}`);
-
-          // Director → Manager line
-          if (data.director) drawL(pdf, dirCX, dirBottomY, cx, curY);
-
-          mx += MGR_W + GAP_H;
-        }
-      }
-      const mgrBottomY = curY + MGR_H;
-      curY = mgrBottomY + GAP_V;
-
-      // ── Departments (stacked vertically, one per band) ──
-      for (let di = 0; di < deptLayouts.length; di++) {
-        const { dept, labelW, staffRowW, rows } = deptLayouts[di];
-        const bandCX = PAGE_W / 2; // center each band on the page
-
-        // Pill label — never truncated
-        const labelY = curY;
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(8.5);
-        const lx = bandCX - labelW / 2;
-        pdf.setFillColor(...hex(dept.color));
-        pdf.roundedRect(lx, labelY, labelW, LABEL_H, 5, 5, "F");
-        pdf.setTextColor(255, 255, 255);
-        pdf.text(dept.name, bandCX, labelY + 8, { align: "center" });
-        console.log(`[PDF] Drew dept label: "${dept.name}" at y=${labelY.toFixed(0)}, labelW=${labelW.toFixed(0)}`);
-
-        // Manager → Dept label line
-        if (dept.manager) {
-          const mp = mgrPos.find((p) => p.name === dept.manager!.name);
-          if (mp) drawL(pdf, mp.cx, mgrBottomY, bandCX, labelY);
-        }
-
-        // Staff cards
-        let sy = labelY + LABEL_H + LABEL_TO_STAFF;
-        for (let ri = 0; ri < rows.length; ri++) {
-          const row = rows[ri];
-          const rowW = row.length * (STAFF_W + STAFF_GAP_H) - STAFF_GAP_H;
-          let sx = bandCX - rowW / 2;
-
-          for (let si = 0; si < row.length; si++) {
-            const emp = row[si];
-            drawCard(pdf, sx, sy, STAFF_W, STAFF_H, emp, dept.color);
-            drawL(pdf, bandCX, labelY + LABEL_H, sx + STAFF_W / 2, sy);
-            drawnCount++;
-            console.log(`[PDF] Drew staff: ${emp.name} (${dept.name}) at x=${sx.toFixed(0)}, y=${sy.toFixed(0)}`);
-            sx += STAFF_W + STAFF_GAP_H;
-          }
-          sy += STAFF_H + STAFF_GAP_V;
-        }
-
-        // Advance curY past this department band
-        curY += deptLayouts[di].bandH + GAP_V;
-      }
-
-      // Verify employee count
-      if (drawnCount !== data.totalEmployees) {
-        console.warn(`[PDF] ⚠️ MISMATCH: drew ${drawnCount} cards but totalEmployees=${data.totalEmployees}`);
-      } else {
-        console.log(`[PDF] ✓ Page 1 done. Drew all ${drawnCount} employees.`);
-      }
+      // Chart image — fit to width, centered
+      const chartImg = chartCanvas.toDataURL("image/png");
+      const chartX = MARGIN + (contentW - chartImgW) / 2;
+      pdf.addImage(chartImg, "PNG", chartX, HEADER_H + 5, chartImgW, chartImgH);
 
       // Footer
-      pdf.setTextColor(120, 120, 120);
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(7);
+      pdf.setTextColor(100, 100, 100);
+      pdf.setFontSize(8);
       pdf.text(
         `Total Employees: ${data.totalEmployees}  |  Total Annual Payroll: $${data.totalAnnualPayroll.toLocaleString()}`,
         MARGIN,
-        PAGE_H - 8,
+        page1H - 8,
       );
-      pdf.text("Confidential", PAGE_W - MARGIN, PAGE_H - 8, { align: "right" });
+      pdf.text("Confidential", A3_W - MARGIN, page1H - 8, { align: "right" });
 
-      // ══════════════════════════════════════════════════════════════════
-      // STEP 3: Page 2 — Salary Table (same width as page 1)
-      // ══════════════════════════════════════════════════════════════════
-
-      // Table column definitions — widths scaled to fit PAGE_W
-      const colDefs = [
-        { label: "Department", base: 42 },
-        { label: "Employee", base: 55 },
-        { label: "Position", base: 55 },
-        { label: "Start Date", base: 34 },
-        { label: "Visa Status", base: 34 },
-        { label: "Pay Frequency", base: 34 },
-        { label: "Hourly Rate", base: 34, right: true as const },
-        { label: "Annual Salary", base: 42, right: true as const },
-        { label: "Monthly Salary", base: 42, right: true as const },
-      ];
-      const baseTotal = colDefs.reduce((s, c) => s + c.base, 0); // 372
-      const availableW = PAGE_W - MARGIN * 2;
-      const scale = Math.max(1, availableW / baseTotal); // scale up if page is wider; never scale down
-      const cols = colDefs.map((c) => ({
-        label: c.label,
-        w: c.base * Math.min(scale, 1.5), // cap at 1.5x to avoid overly wide columns
-        right: "right" in c ? c.right : (false as const),
-      }));
-      const TW = cols.reduce((s, c) => s + c.w, 0);
-
-      // Compute table page height
-      let totalTableRows = 0;
-      const groups: { name: string; employees: Employee[] }[] = [];
-      const mgmt = [
-        ...(data.director ? [data.director] : []),
-        ...data.managers,
-      ];
-      if (mgmt.length) groups.push({ name: "Management", employees: mgmt });
-      for (const d of data.departments)
-        if (d.staff.length) groups.push({ name: d.name, employees: d.staff });
-      for (const g of groups) totalTableRows += g.employees.length + 1; // +1 for subtotal
-      totalTableRows += 1; // header row
-      totalTableRows += 1; // grand total row
-
-      const RH = 6.5;
-      const tableContentH = HEADER_H + 10 + totalTableRows * (RH + 0.15) + FOOTER_H + 10;
-      const T_H = Math.max(297, tableContentH);
-
-      // CRITICAL: orientation "l" so PAGE_W is the width
-      pdf.addPage([T_H, PAGE_W], "l");
-      console.log(`[PDF] Page 2 size: ${PAGE_W.toFixed(0)}×${T_H.toFixed(0)}mm, table width: ${TW.toFixed(0)}mm`);
+      // ── Page 2: Salary Table ──
+      pdf.addPage([page2H, A3_W], "l");
 
       // Header
-      pdf.setFillColor(...hex("#1E3A5F"));
-      pdf.rect(0, 0, PAGE_W, HEADER_H, "F");
+      pdf.setFillColor(30, 58, 95);
+      pdf.rect(0, 0, A3_W, HEADER_H, "F");
       pdf.setTextColor(255, 255, 255);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(16);
@@ -394,114 +125,22 @@ export default function PdfExporter({ data }: PdfExporterProps) {
       pdf.setFontSize(10);
       pdf.text(`Employee Salary Details \u2014 As at ${data.asAtDate}`, MARGIN, 20);
 
-      const TX = MARGIN + (availableW - TW) / 2; // center table
-      let ty = HEADER_H + 10;
-
-      // Table header row
-      pdf.setFillColor(...hex("#1E3A5F"));
-      pdf.rect(TX, ty, TW, RH + 1, "F");
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(6.5);
-      let cx = TX;
-      for (const c of cols) {
-        pdf.text(c.label, c.right ? cx + c.w - 2 : cx + 2, ty + 4.5, {
-          align: c.right ? "right" : "left",
-        });
-        cx += c.w;
-      }
-      ty += RH + 1;
-
-      // Data rows
-      let grandMonthly = 0;
-
-      for (const group of groups) {
-        let subAnnual = 0;
-        let subMonthly = 0;
-
-        for (let i = 0; i < group.employees.length; i++) {
-          const e = group.employees[i];
-          subAnnual += e.annualSalary || 0;
-          subMonthly += e.monthlySalary || 0;
-
-          if (i % 2 === 1) {
-            pdf.setFillColor(248, 250, 252);
-            pdf.rect(TX, ty, TW, RH, "F");
-          }
-
-          pdf.setTextColor(55, 65, 81);
-          pdf.setFont("helvetica", "normal");
-          pdf.setFontSize(6);
-
-          const vals = [
-            i === 0 ? group.name : "",
-            e.name + (e.vacant ? " [Vacant]" : ""),
-            e.position,
-            e.startDate || "",
-            e.visaStatus || "",
-            e.payFrequency || "",
-            e.hourlyRate ? `$${e.hourlyRate.toFixed(2)}` : "-",
-            e.annualSalary ? `$${e.annualSalary.toLocaleString()}` : "-",
-            e.monthlySalary ? `$${e.monthlySalary.toLocaleString()}` : "-",
-          ];
-
-          cx = TX;
-          for (let c = 0; c < cols.length; c++) {
-            const col = cols[c];
-            if (c === 0 && i === 0) pdf.setFont("helvetica", "bold");
-            pdf.text(
-              trunc(pdf, vals[c], col.w - 4),
-              col.right ? cx + col.w - 2 : cx + 2,
-              ty + 4.2,
-              { align: col.right ? "right" : "left" },
-            );
-            if (c === 0 && i === 0) pdf.setFont("helvetica", "normal");
-            cx += col.w;
-          }
-          ty += RH;
-        }
-        grandMonthly += subMonthly;
-
-        // Subtotal row
-        pdf.setFillColor(229, 231, 235);
-        pdf.rect(TX, ty, TW, RH, "F");
-        pdf.setTextColor(55, 65, 81);
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(6);
-        pdf.text(
-          `Subtotal \u2014 ${group.name} (${group.employees.length} employees)`,
-          TX + 2,
-          ty + 4.2,
-        );
-        const annColX = TX + cols.slice(0, 7).reduce((s, c) => s + c.w, 0);
-        pdf.text(`$${subAnnual.toLocaleString()}`, annColX + cols[7].w - 2, ty + 4.2, { align: "right" });
-        pdf.text(`$${subMonthly.toLocaleString()}`, annColX + cols[7].w + cols[8].w - 2, ty + 4.2, { align: "right" });
-        ty += RH;
-      }
-
-      // Grand total row
-      pdf.setFillColor(...hex("#1E3A5F"));
-      pdf.rect(TX, ty, TW, RH + 1, "F");
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(6.5);
-      pdf.text(`GRAND TOTAL (${data.totalEmployees} employees)`, TX + 2, ty + 4.5);
-      const gAnnX = TX + cols.slice(0, 7).reduce((s, c) => s + c.w, 0);
-      pdf.text(`$${data.totalAnnualPayroll.toLocaleString()}`, gAnnX + cols[7].w - 2, ty + 4.5, { align: "right" });
-      pdf.text(`$${grandMonthly.toLocaleString()}`, gAnnX + cols[7].w + cols[8].w - 2, ty + 4.5, { align: "right" });
+      // Table image
+      const tableImg = tableCanvas.toDataURL("image/png");
+      const tableX = MARGIN + (contentW - tableImgW) / 2;
+      pdf.addImage(tableImg, "PNG", tableX, HEADER_H + 5, tableImgW, tableImgH);
 
       // Footer
-      pdf.setTextColor(120, 120, 120);
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(7);
-      pdf.text("Confidential", PAGE_W - MARGIN, T_H - 8, { align: "right" });
+      pdf.setTextColor(100, 100, 100);
+      pdf.setFontSize(8);
+      pdf.text("Confidential", A3_W - MARGIN, page2H - 8, { align: "right" });
 
       // Save
-      const fn = `${data.companyName.replace(/\s+/g, "_")}_OrgChart_${data.asAtDate.replace(/\s+/g, "_")}.pdf`;
-      pdf.save(fn);
-      console.log(`[PDF] Saved: ${fn}`);
+      const filename = `${data.companyName.replace(/\s+/g, "_")}_OrgChart_${data.asAtDate.replace(/\s+/g, "_")}.pdf`;
+      pdf.save(filename);
+      console.log("[PDF] Saved:", filename);
     } catch (err) {
-      console.error("PDF export failed:", err);
+      console.error("[PDF] Export failed:", err);
       console.error("Details:", {
         message: err instanceof Error ? err.message : String(err),
         stack: err instanceof Error ? err.stack : undefined,
@@ -510,7 +149,7 @@ export default function PdfExporter({ data }: PdfExporterProps) {
     } finally {
       setExporting(false);
     }
-  }, [data]);
+  }, [data, chartRef, tableRef]);
 
   return (
     <button
