@@ -27,67 +27,110 @@ export default function PdfExporter({
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
 
-      const A3_W = 420;
-      const A3_H = 297;
       const MARGIN = 15;
       const HEADER_H = 25;
       const FOOTER_H = 15;
+      const MIN_W = 420; // at least A3 landscape width
+
+      // ── Helper: temporarily expand element for full capture ──
+      function expandForCapture(el: HTMLElement) {
+        const saved = {
+          overflow: el.style.overflow,
+          width: el.style.width,
+          maxWidth: el.style.maxWidth,
+          position: el.style.position,
+        };
+        el.style.overflow = "visible";
+        el.style.width = "auto";
+        el.style.maxWidth = "none";
+        el.style.position = "relative";
+        return saved;
+      }
+      function restoreStyle(el: HTMLElement, saved: Record<string, string>) {
+        el.style.overflow = saved.overflow;
+        el.style.width = saved.width;
+        el.style.maxWidth = saved.maxWidth;
+        el.style.position = saved.position;
+      }
 
       // ── Capture chart ──
       console.log("[PDF] Capturing org chart...");
-      const chartCanvas = await html2canvas(chartRef.current, {
+      const chartEl = chartRef.current;
+      const chartSaved = expandForCapture(chartEl);
+      // Force layout recalc
+      const chartW = chartEl.scrollWidth;
+      const chartH = chartEl.scrollHeight;
+      console.log(`[PDF] Chart scroll size: ${chartW}x${chartH}`);
+
+      const chartCanvas = await html2canvas(chartEl, {
         scale: 2,
         backgroundColor: "#F8FAFC",
         useCORS: true,
         logging: false,
-        windowWidth: chartRef.current.scrollWidth,
-        windowHeight: chartRef.current.scrollHeight,
+        width: chartW,
+        height: chartH,
+        windowWidth: chartW,
+        windowHeight: chartH,
       });
+      restoreStyle(chartEl, chartSaved);
       console.log("[PDF] Chart captured:", chartCanvas.width, "x", chartCanvas.height);
 
       // ── Capture table ──
       console.log("[PDF] Capturing salary table...");
-      const tableCanvas = await html2canvas(tableRef.current, {
+      const tableEl = tableRef.current;
+      const tableSaved = expandForCapture(tableEl);
+      const tableW = tableEl.scrollWidth;
+      const tableH = tableEl.scrollHeight;
+      console.log(`[PDF] Table scroll size: ${tableW}x${tableH}`);
+
+      const tableCanvas = await html2canvas(tableEl, {
         scale: 2,
         backgroundColor: "#FFFFFF",
         useCORS: true,
         logging: false,
-        windowWidth: tableRef.current.scrollWidth,
-        windowHeight: tableRef.current.scrollHeight,
+        width: tableW,
+        height: tableH,
+        windowWidth: tableW,
+        windowHeight: tableH,
       });
+      restoreStyle(tableEl, tableSaved);
       console.log("[PDF] Table captured:", tableCanvas.width, "x", tableCanvas.height);
 
-      // ── Determine page size ──
-      // Scale chart to fit width, then see if height exceeds A3
-      const contentW = A3_W - MARGIN * 2;
-      const contentMaxH = A3_H - HEADER_H - FOOTER_H - 10;
+      // ── Determine page size dynamically from captured content ──
+      // Convert captured pixels to mm: chartCanvas is at scale=2, so real px = canvas/2
+      // We'll fit the content to the page, using the aspect ratio
 
       const chartAspect = chartCanvas.width / chartCanvas.height;
-      let chartImgW = contentW;
-      let chartImgH = chartImgW / chartAspect;
-
-      // If chart is taller than A3 content area, use a taller page
-      const page1H = Math.max(A3_H, HEADER_H + 5 + chartImgH + 5 + FOOTER_H);
-
       const tableAspect = tableCanvas.width / tableCanvas.height;
-      let tableImgW = contentW;
-      let tableImgH = tableImgW / tableAspect;
-      const page2H = Math.max(A3_H, HEADER_H + 5 + tableImgH + 5 + FOOTER_H);
 
-      console.log(`[PDF] Page 1: ${A3_W}x${page1H.toFixed(0)}mm, chart img: ${chartImgW.toFixed(0)}x${chartImgH.toFixed(0)}mm`);
-      console.log(`[PDF] Page 2: ${A3_W}x${page2H.toFixed(0)}mm, table img: ${tableImgW.toFixed(0)}x${tableImgH.toFixed(0)}mm`);
+      // Page width: at least MIN_W, but wider if content is very wide relative to height
+      const contentW = MIN_W - MARGIN * 2;
+
+      // Chart page: fit chart to contentW, compute height
+      const chartImgW = contentW;
+      const chartImgH = chartImgW / chartAspect;
+      const page1W = MIN_W;
+      const page1H = Math.max(297, HEADER_H + 5 + chartImgH + 5 + FOOTER_H);
+
+      // Table page: fit table to contentW, compute height
+      const tableImgW = contentW;
+      const tableImgH = tableImgW / tableAspect;
+      const page2W = MIN_W;
+      const page2H = Math.max(297, HEADER_H + 5 + tableImgH + 5 + FOOTER_H);
+
+      console.log(`[PDF] Page 1: ${page1W}x${page1H.toFixed(0)}mm, chart img: ${chartImgW.toFixed(0)}x${chartImgH.toFixed(0)}mm`);
+      console.log(`[PDF] Page 2: ${page2W}x${page2H.toFixed(0)}mm, table img: ${tableImgW.toFixed(0)}x${tableImgH.toFixed(0)}mm`);
 
       // ── Create PDF ──
       const pdf = new jsPDF({
         unit: "mm",
         orientation: "l",
-        format: [page1H, A3_W],
+        format: [page1H, page1W],
       });
 
       // ── Page 1: Org Chart ──
-      // Header
       pdf.setFillColor(30, 58, 95);
-      pdf.rect(0, 0, A3_W, HEADER_H, "F");
+      pdf.rect(0, 0, page1W, HEADER_H, "F");
       pdf.setTextColor(255, 255, 255);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(16);
@@ -96,12 +139,10 @@ export default function PdfExporter({
       pdf.setFontSize(10);
       pdf.text(`Organisation Chart \u2014 As at ${data.asAtDate}`, MARGIN, 20);
 
-      // Chart image — fit to width, centered
       const chartImg = chartCanvas.toDataURL("image/png");
       const chartX = MARGIN + (contentW - chartImgW) / 2;
       pdf.addImage(chartImg, "PNG", chartX, HEADER_H + 5, chartImgW, chartImgH);
 
-      // Footer
       pdf.setTextColor(100, 100, 100);
       pdf.setFontSize(8);
       pdf.text(
@@ -109,14 +150,13 @@ export default function PdfExporter({
         MARGIN,
         page1H - 8,
       );
-      pdf.text("Confidential", A3_W - MARGIN, page1H - 8, { align: "right" });
+      pdf.text("Confidential", page1W - MARGIN, page1H - 8, { align: "right" });
 
       // ── Page 2: Salary Table ──
-      pdf.addPage([page2H, A3_W], "l");
+      pdf.addPage([page2H, page2W], "l");
 
-      // Header
       pdf.setFillColor(30, 58, 95);
-      pdf.rect(0, 0, A3_W, HEADER_H, "F");
+      pdf.rect(0, 0, page2W, HEADER_H, "F");
       pdf.setTextColor(255, 255, 255);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(16);
@@ -125,15 +165,13 @@ export default function PdfExporter({
       pdf.setFontSize(10);
       pdf.text(`Employee Salary Details \u2014 As at ${data.asAtDate}`, MARGIN, 20);
 
-      // Table image
       const tableImg = tableCanvas.toDataURL("image/png");
       const tableX = MARGIN + (contentW - tableImgW) / 2;
       pdf.addImage(tableImg, "PNG", tableX, HEADER_H + 5, tableImgW, tableImgH);
 
-      // Footer
       pdf.setTextColor(100, 100, 100);
       pdf.setFontSize(8);
-      pdf.text("Confidential", A3_W - MARGIN, page2H - 8, { align: "right" });
+      pdf.text("Confidential", page2W - MARGIN, page2H - 8, { align: "right" });
 
       // Save
       const filename = `${data.companyName.replace(/\s+/g, "_")}_OrgChart_${data.asAtDate.replace(/\s+/g, "_")}.pdf`;
