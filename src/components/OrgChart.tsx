@@ -8,23 +8,37 @@ import {
   MANAGER_COLOR,
 } from "@/lib/types";
 
-/*
- * Flat 3-layer org chart with pure CSS border connector lines.
- *
- * Layer 1: Director (centered)
- * Layer 2: Managers (horizontal row, connected by horizontal bar)
- * Layer 3: Departments side-by-side (each with grid of staff cards)
- *
- * No SVG, no JS coordinates, no absolute positioning for lines.
- * All connectors are plain divs with borders — html2canvas compatible.
- */
-
 const LINE = "#94A3B8";
 const CARD_W = 200;
 
+// ── Props ────────────────────────────────────────────────────────────────────
+
+interface OrgChartProps {
+  data: OrgData;
+  editMode?: boolean;
+  onCardClick?: (emp: Employee) => void;
+  onCardContext?: (emp: Employee, x: number, y: number) => void;
+  onDeptContext?: (dept: DepartmentGroup, x: number, y: number) => void;
+  onBlankContext?: (x: number, y: number) => void;
+  onAddToDept?: (deptName: string) => void;
+  onAddManager?: () => void;
+}
+
 // ── Employee Card ────────────────────────────────────────────────────────────
 
-function Card({ emp, color }: { emp: Employee; color: string }) {
+function Card({
+  emp,
+  color,
+  editMode,
+  onClick,
+  onContext,
+}: {
+  emp: Employee;
+  color: string;
+  editMode?: boolean;
+  onClick?: () => void;
+  onContext?: (x: number, y: number) => void;
+}) {
   const v = emp.vacant;
   const sal = emp.annualSalary
     ? `$${emp.annualSalary.toLocaleString()}/yr`
@@ -34,6 +48,16 @@ function Card({ emp, color }: { emp: Employee; color: string }) {
 
   return (
     <div
+      onClick={editMode ? onClick : undefined}
+      onContextMenu={
+        editMode
+          ? (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onContext?.(e.clientX, e.clientY);
+            }
+          : undefined
+      }
       style={{
         width: CARD_W,
         backgroundColor: v ? "transparent" : color,
@@ -41,9 +65,23 @@ function Card({ emp, color }: { emp: Employee; color: string }) {
         borderRadius: 12,
         overflow: "hidden",
         boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+        cursor: editMode ? "pointer" : "default",
+        transition: "box-shadow 0.15s",
+        ...(editMode ? { outline: "2px solid transparent" } : {}),
+      }}
+      onMouseEnter={(e) => {
+        if (editMode) e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.2)";
+      }}
+      onMouseLeave={(e) => {
+        if (editMode) e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)";
       }}
     >
-      <div style={{ padding: "12px 14px" }}>
+      <div style={{ padding: "12px 14px", position: "relative" }}>
+        {editMode && (
+          <span style={{ position: "absolute", top: 4, right: 6, fontSize: 12, opacity: 0.6, color: v ? color : "#fff" }}>
+            &#9998;
+          </span>
+        )}
         {v && (
           <span
             style={{
@@ -86,106 +124,143 @@ function Card({ emp, color }: { emp: Employee; color: string }) {
   );
 }
 
+// ── Add button ───────────────────────────────────────────────────────────────
+
+function AddBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="edit-ui"
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: "50%",
+        border: "2px solid #94A3B8",
+        backgroundColor: "#fff",
+        color: "#64748B",
+        fontSize: 18,
+        lineHeight: "24px",
+        textAlign: "center",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        transition: "all 0.15s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.backgroundColor = "#1E3A5F";
+        e.currentTarget.style.color = "#fff";
+        e.currentTarget.style.borderColor = "#1E3A5F";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.backgroundColor = "#fff";
+        e.currentTarget.style.color = "#64748B";
+        e.currentTarget.style.borderColor = "#94A3B8";
+      }}
+    >
+      +
+    </button>
+  );
+}
+
 // ── Vertical stem line ───────────────────────────────────────────────────────
 
 function VLine({ h = 32 }: { h?: number }) {
   return (
-    <div
-      style={{
-        width: 1,
-        height: h,
-        backgroundColor: LINE,
-        margin: "0 auto",
-        flexShrink: 0,
-      }}
-    />
+    <div style={{ width: 1, height: h, backgroundColor: LINE, margin: "0 auto", flexShrink: 0 }} />
   );
 }
 
 // ── Horizontal connector row ─────────────────────────────────────────────────
-// Renders children in a flex row with a horizontal bar connecting them.
-// Each child gets a vertical drop from the horizontal bar.
 
-function HRow({
-  children,
-  gap = 16,
-}: {
-  children: React.ReactNode[];
-  gap?: number;
-}) {
+function HRow({ children, gap = 16 }: { children: React.ReactNode[]; gap?: number }) {
   const n = children.length;
   if (n === 0) return null;
-
   if (n === 1) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        {children[0]}
-      </div>
-    );
+    return <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>{children[0]}</div>;
   }
-
   return (
     <div style={{ display: "flex", justifyContent: "center" }}>
-      {children.map((child, i) => {
-        const isFirst = i === 0;
-        const isLast = i === n - 1;
-        return (
+      {children.map((child, i) => (
+        <div
+          key={i}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            position: "relative",
+            padding: `0 ${gap / 2}px`,
+          }}
+        >
           <div
-            key={i}
             style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              position: "relative",
-              padding: `0 ${gap / 2}px`,
+              position: "absolute",
+              top: 0,
+              left: i === 0 ? "50%" : 0,
+              right: i === n - 1 ? "50%" : 0,
+              height: 0,
+              borderTop: `2px solid ${LINE}`,
             }}
-          >
-            {/* Horizontal line segment at top */}
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: isFirst ? "50%" : 0,
-                right: isLast ? "50%" : 0,
-                height: 0,
-                borderTop: `2px solid ${LINE}`,
-              }}
-            />
-            {/* Vertical drop */}
-            <div style={{ width: 1, height: 20, backgroundColor: LINE }} />
-            {/* Child content */}
-            {child}
-          </div>
-        );
-      })}
+          />
+          <div style={{ width: 1, height: 20, backgroundColor: LINE }} />
+          {child}
+        </div>
+      ))}
     </div>
   );
 }
 
 // ── Department section ───────────────────────────────────────────────────────
 
-function DeptSection({ dept }: { dept: DepartmentGroup }) {
+function DeptSection({
+  dept,
+  editMode,
+  onCardClick,
+  onCardContext,
+  onDeptContext,
+  onAdd,
+}: {
+  dept: DepartmentGroup;
+  editMode?: boolean;
+  onCardClick?: (emp: Employee) => void;
+  onCardContext?: (emp: Employee, x: number, y: number) => void;
+  onDeptContext?: (dept: DepartmentGroup, x: number, y: number) => void;
+  onAdd?: () => void;
+}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       {/* Pill label */}
-      <div
-        style={{
-          display: "inline-block",
-          borderRadius: 999,
-          padding: "6px 20px",
-          backgroundColor: dept.color,
-          color: "#fff",
-          fontWeight: 700,
-          fontSize: 14,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
-          letterSpacing: "0.02em",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {dept.name}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div
+          onContextMenu={
+            editMode
+              ? (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDeptContext?.(dept, e.clientX, e.clientY);
+                }
+              : undefined
+          }
+          style={{
+            display: "inline-block",
+            borderRadius: 999,
+            padding: "6px 20px",
+            backgroundColor: dept.color,
+            color: "#fff",
+            fontWeight: 700,
+            fontSize: 14,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+            letterSpacing: "0.02em",
+            whiteSpace: "nowrap",
+            cursor: editMode ? "context-menu" : "default",
+          }}
+        >
+          {dept.name}
+        </div>
+        {editMode && onAdd && <AddBtn onClick={onAdd} />}
       </div>
 
-      {/* Stem to staff grid */}
       {dept.staff.length > 0 && (
         <>
           <VLine h={16} />
@@ -197,7 +272,14 @@ function DeptSection({ dept }: { dept: DepartmentGroup }) {
             }}
           >
             {dept.staff.map((emp) => (
-              <Card key={emp.name} emp={emp} color={dept.color} />
+              <Card
+                key={emp.name}
+                emp={emp}
+                color={dept.color}
+                editMode={editMode}
+                onClick={() => onCardClick?.(emp)}
+                onContext={(x, y) => onCardContext?.(emp, x, y)}
+              />
             ))}
           </div>
         </>
@@ -208,36 +290,82 @@ function DeptSection({ dept }: { dept: DepartmentGroup }) {
 
 // ── Main OrgChart ────────────────────────────────────────────────────────────
 
-export default function OrgChart({ data }: { data: OrgData }) {
+export default function OrgChart({
+  data,
+  editMode,
+  onCardClick,
+  onCardContext,
+  onDeptContext,
+  onBlankContext,
+  onAddToDept,
+  onAddManager,
+}: OrgChartProps) {
   return (
-    <div style={{ minWidth: 1200, overflowX: "auto" }}>
-      {/* ── Layer 1: Director ── */}
+    <div
+      style={{ minWidth: 1200, overflowX: "auto" }}
+      onContextMenu={
+        editMode
+          ? (e) => {
+              // Only fire if clicking on blank area (not bubbled from card/dept)
+              if (e.target === e.currentTarget || (e.target as HTMLElement).dataset?.blank) {
+                e.preventDefault();
+                onBlankContext?.(e.clientX, e.clientY);
+              }
+            }
+          : undefined
+      }
+    >
+      {/* Layer 1: Director */}
       {data.director && (
         <div style={{ display: "flex", justifyContent: "center" }}>
-          <Card emp={data.director} color={DIRECTOR_COLOR} />
+          <Card
+            emp={data.director}
+            color={DIRECTOR_COLOR}
+            editMode={editMode}
+            onClick={() => onCardClick?.(data.director!)}
+            onContext={(x, y) => onCardContext?.(data.director!, x, y)}
+          />
         </div>
       )}
 
-      {/* ── Stem: Director → Managers ── */}
       {data.director && data.managers.length > 0 && <VLine />}
 
-      {/* ── Layer 2: Managers (horizontal bar + row) ── */}
+      {/* Layer 2: Managers */}
       {data.managers.length > 0 && (
-        <HRow gap={20}>
-          {data.managers.map((mgr) => (
-            <Card key={mgr.name} emp={mgr} color={MANAGER_COLOR} />
-          ))}
-        </HRow>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <HRow gap={20}>
+              {data.managers.map((mgr) => (
+                <Card
+                  key={mgr.name}
+                  emp={mgr}
+                  color={MANAGER_COLOR}
+                  editMode={editMode}
+                  onClick={() => onCardClick?.(mgr)}
+                  onContext={(x, y) => onCardContext?.(mgr, x, y)}
+                />
+              ))}
+            </HRow>
+          </div>
+          {editMode && onAddManager && <AddBtn onClick={onAddManager} />}
+        </div>
       )}
 
-      {/* ── Stem: Managers → Departments ── */}
       {data.departments.length > 0 && <VLine />}
 
-      {/* ── Layer 3: Departments (horizontal bar + row) ── */}
+      {/* Layer 3: Departments */}
       {data.departments.length > 0 && (
         <HRow gap={32}>
           {data.departments.map((dept) => (
-            <DeptSection key={dept.name} dept={dept} />
+            <DeptSection
+              key={dept.name}
+              dept={dept}
+              editMode={editMode}
+              onCardClick={onCardClick}
+              onCardContext={onCardContext}
+              onDeptContext={onDeptContext}
+              onAdd={() => onAddToDept?.(dept.name)}
+            />
           ))}
         </HRow>
       )}

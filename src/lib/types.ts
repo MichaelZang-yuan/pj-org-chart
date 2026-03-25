@@ -8,8 +8,11 @@ export interface Employee {
   annualSalary: number;
   monthlySalary: number;
   department: string;
-  level: 0 | 1 | 2;
+  level: number; // 0=Director, 1=Manager, 2=Staff, 1.5=between
   vacant?: boolean;
+  independent?: boolean;
+  reportsTo?: string;
+  subordinates?: string[];
 }
 
 export interface DepartmentGroup {
