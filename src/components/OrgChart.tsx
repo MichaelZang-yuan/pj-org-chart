@@ -9,29 +9,20 @@ import {
 } from "@/lib/types";
 
 /*
- * Pure CSS org chart tree.
- * Uses <ul>/<li> + CSS border lines. No SVG, no refs, no JS coordinates.
- * Lines are drawn with ::before / ::after on <li> elements.
- * html2canvas captures these perfectly because they are normal DOM/CSS.
+ * Flat 3-layer org chart with pure CSS border connector lines.
  *
- * Technique: each <li> in a row draws:
- *   ::before  — horizontal line on the left half  (border-bottom)
- *   ::after   — horizontal line on the right half (border-bottom)
- *   first-child  hides ::before  (no line to the left)
- *   last-child   hides ::after   (no line to the right)
- *   only-child   hides both (just vertical stem)
+ * Layer 1: Director (centered)
+ * Layer 2: Managers (horizontal row, connected by horizontal bar)
+ * Layer 3: Departments side-by-side (each with grid of staff cards)
  *
- * The vertical stem (parent ↓ child) is a border-left on a zero-width
- * div sitting between the card and the horizontal bar.
+ * No SVG, no JS coordinates, no absolute positioning for lines.
+ * All connectors are plain divs with borders — html2canvas compatible.
  */
 
-// ── styles (CSS-in-JS, inline) ──────────────────────────────────────────────
+const LINE = "#94A3B8";
+const CARD_W = 200;
 
-const LINE_COLOR = "#94A3B8";
-const LINE_W = 2;
-const STEM_H = 20;
-
-// ── Card ─────────────────────────────────────────────────────────────────────
+// ── Employee Card ────────────────────────────────────────────────────────────
 
 function Card({ emp, color }: { emp: Employee; color: string }) {
   const v = emp.vacant;
@@ -43,23 +34,23 @@ function Card({ emp, color }: { emp: Employee; color: string }) {
 
   return (
     <div
-      className="rounded-xl overflow-hidden shadow-md"
       style={{
+        width: CARD_W,
         backgroundColor: v ? "transparent" : color,
         border: v ? `2px dashed ${color}` : "none",
-        minWidth: 200,
-        maxWidth: 260,
-        display: "inline-block",
+        borderRadius: 12,
+        overflow: "hidden",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
       }}
     >
-      <div style={{ padding: "12px 16px" }}>
+      <div style={{ padding: "12px 14px" }}>
         {v && (
           <span
             style={{
               display: "inline-block",
               fontSize: 10,
               fontWeight: 700,
-              textTransform: "uppercase",
+              textTransform: "uppercase" as const,
               letterSpacing: "0.05em",
               borderRadius: 4,
               padding: "2px 8px",
@@ -72,7 +63,7 @@ function Card({ emp, color }: { emp: Employee; color: string }) {
             Vacant
           </span>
         )}
-        <p style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.3, color: v ? color : "#fff" }}>
+        <p style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.3, color: v ? color : "#fff", margin: 0 }}>
           {emp.name}
         </p>
         <p style={{ fontSize: 14, lineHeight: 1.3, marginTop: 2, color: v ? color : "rgba(255,255,255,0.85)" }}>
@@ -95,273 +86,160 @@ function Card({ emp, color }: { emp: Employee; color: string }) {
   );
 }
 
-// ── Dept label pill ──────────────────────────────────────────────────────────
+// ── Vertical stem line ───────────────────────────────────────────────────────
 
-function DeptPill({ dept }: { dept: DepartmentGroup }) {
+function VLine({ h = 32 }: { h?: number }) {
   return (
     <div
       style={{
-        display: "inline-block",
-        borderRadius: 999,
-        padding: "6px 20px",
-        backgroundColor: dept.color,
-        color: "#fff",
-        fontWeight: 700,
-        fontSize: 14,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
-        letterSpacing: "0.02em",
+        width: 1,
+        height: h,
+        backgroundColor: LINE,
+        margin: "0 auto",
+        flexShrink: 0,
       }}
-    >
-      {dept.name}
+    />
+  );
+}
+
+// ── Horizontal connector row ─────────────────────────────────────────────────
+// Renders children in a flex row with a horizontal bar connecting them.
+// Each child gets a vertical drop from the horizontal bar.
+
+function HRow({
+  children,
+  gap = 16,
+}: {
+  children: React.ReactNode[];
+  gap?: number;
+}) {
+  const n = children.length;
+  if (n === 0) return null;
+
+  if (n === 1) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+        {children[0]}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", justifyContent: "center" }}>
+      {children.map((child, i) => {
+        const isFirst = i === 0;
+        const isLast = i === n - 1;
+        return (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              position: "relative",
+              padding: `0 ${gap / 2}px`,
+            }}
+          >
+            {/* Horizontal line segment at top */}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: isFirst ? "50%" : 0,
+                right: isLast ? "50%" : 0,
+                height: 0,
+                borderTop: `2px solid ${LINE}`,
+              }}
+            />
+            {/* Vertical drop */}
+            <div style={{ width: 1, height: 20, backgroundColor: LINE }} />
+            {/* Child content */}
+            {child}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// ── Tree node wrapper ────────────────────────────────────────────────────────
-// Wraps a card (or any content) and optionally draws children below it
-// with pure CSS connector lines.
+// ── Department section ───────────────────────────────────────────────────────
 
-function TreeNode({
-  children,
-  childNodes,
-}: {
-  children: React.ReactNode; // the card / label
-  childNodes?: React.ReactNode[]; // child TreeNodes
-}) {
-  const hasChildren = childNodes && childNodes.length > 0;
-
+function DeptSection({ dept }: { dept: DepartmentGroup }) {
   return (
-    <li
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        position: "relative",
-        padding: `0 ${hasChildren ? 8 : 6}px`,
-        listStyle: "none",
-      }}
-    >
-      {/* The card / label itself */}
-      {children}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+      {/* Pill label */}
+      <div
+        style={{
+          display: "inline-block",
+          borderRadius: 999,
+          padding: "6px 20px",
+          backgroundColor: dept.color,
+          color: "#fff",
+          fontWeight: 700,
+          fontSize: 14,
+          boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+          letterSpacing: "0.02em",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {dept.name}
+      </div>
 
-      {/* Children branch */}
-      {hasChildren && (
+      {/* Stem to staff grid */}
+      {dept.staff.length > 0 && (
         <>
-          {/* Vertical stem DOWN from this node to the horizontal bar */}
+          <VLine h={16} />
           <div
             style={{
-              width: 0,
-              height: STEM_H,
-              borderLeft: `${LINE_W}px solid ${LINE_COLOR}`,
-            }}
-          />
-
-          {/* Children row */}
-          <ul
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              padding: 0,
-              margin: 0,
-              listStyle: "none",
-              position: "relative",
+              display: "grid",
+              gridTemplateColumns: `repeat(2, ${CARD_W}px)`,
+              gap: 10,
             }}
           >
-            {childNodes!.map((child, i) => {
-              const count = childNodes!.length;
-              const isFirst = i === 0;
-              const isLast = i === count - 1;
-              const isOnly = count === 1;
-
-              return (
-                <li
-                  key={i}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    position: "relative",
-                    padding: "0 8px",
-                    listStyle: "none",
-                  }}
-                >
-                  {/* Horizontal connector bar across siblings */}
-                  {/* Each <li> draws its portion of the horizontal line at the top */}
-                  {!isOnly && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: isFirst ? "50%" : 0,
-                        right: isLast ? "50%" : 0,
-                        height: 0,
-                        borderTop: `${LINE_W}px solid ${LINE_COLOR}`,
-                      }}
-                    />
-                  )}
-
-                  {/* Vertical stem UP from horizontal bar to this child */}
-                  <div
-                    style={{
-                      width: 0,
-                      height: STEM_H,
-                      borderLeft: `${LINE_W}px solid ${LINE_COLOR}`,
-                    }}
-                  />
-
-                  {/* The child content */}
-                  {child}
-                </li>
-              );
-            })}
-          </ul>
+            {dept.staff.map((emp) => (
+              <Card key={emp.name} emp={emp} color={dept.color} />
+            ))}
+          </div>
         </>
       )}
-    </li>
+    </div>
   );
 }
 
-// ── Main OrgChart ───────────────────────────────────────────────────────────
+// ── Main OrgChart ────────────────────────────────────────────────────────────
 
 export default function OrgChart({ data }: { data: OrgData }) {
-  // Build manager → departments mapping
-  const mgrToDepts = new Map<string, DepartmentGroup[]>();
-  for (const dept of data.departments) {
-    if (dept.manager) {
-      const arr = mgrToDepts.get(dept.manager.name) || [];
-      arr.push(dept);
-      mgrToDepts.set(dept.manager.name, arr);
-    }
-  }
-  const assignedDeptNames = new Set(
-    data.departments.filter((d) => d.manager).map((d) => d.name)
-  );
-  const unassignedDepts = data.departments.filter(
-    (d) => !assignedDeptNames.has(d.name)
-  );
-
-  // Build staff sub-trees for a department
-  function buildStaffChildren(dept: DepartmentGroup) {
-    if (dept.staff.length === 0) return undefined;
-    // Chunk staff into rows of 4 max to avoid excessive width
-    const MAX = 4;
-    if (dept.staff.length <= MAX) {
-      return dept.staff.map((e) => (
-        <TreeNode key={e.name}>
-          <Card emp={e} color={dept.color} />
-        </TreeNode>
-      ));
-    }
-    // More than MAX: show first row as fan-out, remaining as grid rows below
-    // We'll just use a simple grid wrapped in a single child node
-    return [
-      <li
-        key="grid"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          listStyle: "none",
-          padding: "0 8px",
-          position: "relative",
-        }}
-      >
-        {/* Vertical stem */}
-        <div
-          style={{
-            width: 0,
-            height: STEM_H,
-            borderLeft: `${LINE_W}px solid ${LINE_COLOR}`,
-          }}
-        />
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "center",
-            gap: 12,
-            maxWidth: MAX * 272,
-          }}
-        >
-          {dept.staff.map((e) => (
-            <Card key={e.name} emp={e} color={dept.color} />
-          ))}
-        </div>
-      </li>,
-    ];
-  }
-
-  // Build department sub-trees for a manager
-  function buildDeptChildren(mgr: Employee) {
-    const depts = mgrToDepts.get(mgr.name);
-    if (!depts || depts.length === 0) return undefined;
-    return depts.map((dept) => (
-      <TreeNode key={dept.name} childNodes={buildStaffChildren(dept)}>
-        <DeptPill dept={dept} />
-      </TreeNode>
-    ));
-  }
-
-  // Build manager sub-trees
-  const managerChildren =
-    data.managers.length > 0
-      ? data.managers.map((mgr) => (
-          <TreeNode key={mgr.name} childNodes={buildDeptChildren(mgr)}>
-            <Card emp={mgr} color={MANAGER_COLOR} />
-          </TreeNode>
-        ))
-      : undefined;
-
   return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      <ul
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          padding: 0,
-          margin: 0,
-          listStyle: "none",
-        }}
-      >
-        {/* Root: Director */}
-        {data.director ? (
-          <TreeNode childNodes={managerChildren}>
-            <Card emp={data.director} color={DIRECTOR_COLOR} />
-          </TreeNode>
-        ) : (
-          // No director — show managers as top level
-          managerChildren
-        )}
-      </ul>
-
-      {/* Unassigned departments (not under any manager) */}
-      {unassignedDepts.length > 0 && (
-        <div
-          style={{
-            marginTop: 32,
-            display: "flex",
-            justifyContent: "center",
-            gap: 40,
-            flexWrap: "wrap",
-          }}
-        >
-          {unassignedDepts.map((dept) => (
-            <ul
-              key={dept.name}
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                padding: 0,
-                margin: 0,
-                listStyle: "none",
-              }}
-            >
-              <TreeNode childNodes={buildStaffChildren(dept)}>
-                <DeptPill dept={dept} />
-              </TreeNode>
-            </ul>
-          ))}
+    <div style={{ minWidth: 1200, overflowX: "auto" }}>
+      {/* ── Layer 1: Director ── */}
+      {data.director && (
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <Card emp={data.director} color={DIRECTOR_COLOR} />
         </div>
+      )}
+
+      {/* ── Stem: Director → Managers ── */}
+      {data.director && data.managers.length > 0 && <VLine />}
+
+      {/* ── Layer 2: Managers (horizontal bar + row) ── */}
+      {data.managers.length > 0 && (
+        <HRow gap={20}>
+          {data.managers.map((mgr) => (
+            <Card key={mgr.name} emp={mgr} color={MANAGER_COLOR} />
+          ))}
+        </HRow>
+      )}
+
+      {/* ── Stem: Managers → Departments ── */}
+      {data.departments.length > 0 && <VLine />}
+
+      {/* ── Layer 3: Departments (horizontal bar + row) ── */}
+      {data.departments.length > 0 && (
+        <HRow gap={32}>
+          {data.departments.map((dept) => (
+            <DeptSection key={dept.name} dept={dept} />
+          ))}
+        </HRow>
       )}
     </div>
   );
