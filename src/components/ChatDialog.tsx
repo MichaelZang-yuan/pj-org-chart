@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 import { OrgData } from "@/lib/types";
-import { useAuth } from "@/contexts/AuthContext";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -15,7 +14,6 @@ interface ChatDialogProps {
 }
 
 export default function ChatDialog({ orgData, onUpdate }: ChatDialogProps) {
-  const { touchSession } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,7 +52,6 @@ export default function ChatDialog({ orgData, onUpdate }: ChatDialogProps) {
 
       const result = await res.json();
       onUpdate(result.orgData);
-      touchSession();
 
       const assistantMsg: ChatMessage = {
         role: "assistant",

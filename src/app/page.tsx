@@ -9,9 +9,7 @@ import ChatDialog from "@/components/ChatDialog";
 import EditPanel from "@/components/EditPanel";
 import ContextMenu from "@/components/ContextMenu";
 import AddPositionModal from "@/components/AddPositionModal";
-import LoginPage from "@/components/LoginPage";
 import { useOrgData } from "@/hooks/useOrgData";
-import { useAuth } from "@/contexts/AuthContext";
 import { Employee, DepartmentGroup, OrgData } from "@/lib/types";
 import {
   updateEmployee,
@@ -23,7 +21,6 @@ import {
 } from "@/lib/orgDataHelpers";
 
 export default function Home() {
-  const { user, isGuest, loading: authLoading, logout, touchSession } = useAuth();
   const { orgData, setOrgData, error, loading, processFile, reset } = useOrgData();
   const chartRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLDivElement>(null);
@@ -208,47 +205,10 @@ export default function Home() {
     [orgData, setOrgData]
   );
 
-  // Wrap processFile to touch session
-  const handleFile = async (file: File) => {
-    await processFile(file);
-    touchSession();
-  };
-
-  // Auth gate
-  if (authLoading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
-        <p className="text-sm text-gray-500">加载中...</p>
-      </main>
-    );
-  }
-
-  if (!user && !isGuest) {
-    return <LoginPage />;
-  }
-
   // Upload page
   if (!orgData) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-[#F8FAFC] px-4">
-        {/* User bar */}
-        <div className="fixed top-0 right-0 p-4 flex items-center gap-3 z-10">
-          {user && (
-            <>
-              <span className="text-xs text-gray-500">{user.email}</span>
-              <button
-                onClick={logout}
-                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                退出登录
-              </button>
-            </>
-          )}
-          {isGuest && !user && (
-            <span className="text-xs text-gray-400">游客模式</span>
-          )}
-        </div>
-
         <div className="w-full max-w-xl">
           <div className="mb-8 text-center">
             <h1 className="text-3xl font-bold text-[#1E3A5F]">PJ Org Chart Generator</h1>
@@ -256,7 +216,7 @@ export default function Home() {
               Upload an Excel employee spreadsheet to generate an organisation chart with PDF export
             </p>
           </div>
-          <FileUploader onFile={handleFile} loading={loading} />
+          <FileUploader onFile={processFile} loading={loading} />
           {error && (
             <div className="mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
               {error}
@@ -306,14 +266,6 @@ export default function Home() {
           >
             Re-upload
           </button>
-          {user && (
-            <button
-              onClick={logout}
-              className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              退出登录
-            </button>
-          )}
         </div>
       </div>
 
