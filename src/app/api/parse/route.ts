@@ -37,18 +37,23 @@ DepartmentGroup {
 }
 
 Rules:
+- You MUST include EVERY single person from the Excel data. Do NOT skip or omit anyone. After parsing, count all employees and verify the total matches the number of actual people in the input.
 - Identify the company name and date from header rows (often rows 1-2).
-- Detect department groupings — these are often rows where only the first cell has a value and other columns are empty, acting as section headers.
+- Detect department groupings — these are often rows where only the first cell has a value and other columns are empty, acting as section headers. These rows represent department/group names, and all people listed below them belong to that group (e.g. a row with just "Advisory Board" means the following people are in the Advisory Board group).
+- If a company has multiple people at the highest leadership level (e.g. two Directors, or a CEO and a Director), they should ALL be placed at level 0. Set "director" to one of them and include the others as additional level-0 entries in the "managers" array.
+- Preserve full position/title descriptions exactly as they appear in the Excel. Do NOT truncate, simplify, or shorten them (e.g. "CEO, partner&Director of Gilligansheppard" must be kept in full).
 - Skip totals/subtotals rows (rows starting with "Total" or "Grand Total").
 - Skip empty rows and header rows.
 - For level assignment: Directors/CEOs = 0, Managers or management-level roles = 1, all other staff = 2.
 - For department colors, use these if the department name matches: AKL="#DC2626", CHC="#D97706", Forwarding="#059669", Management="#2563EB". Otherwise pick a reasonable distinct hex color.
-- The "managers" array in the root should contain ALL level-1 employees.
+- The "managers" array in the root should contain ALL level-1 employees (and any additional level-0 employees beyond the primary director).
 - The "departments" array should only contain non-management departments (where staff are level 2). Do NOT create a department entry for "Management".
 - If a manager's title suggests they manage a specific department (e.g. "Warehouse Manager" → warehouse-related depts, "Forwarding Manager" → forwarding dept), set them as that department's "manager".
 - Ensure totalEmployees and totalAnnualPayroll are computed correctly from all employees.
 - All salary numbers should be plain numbers (no currency symbols, no commas).
-- If a date looks like an Excel serial number, convert it to ISO date format.`;
+- If a date looks like an Excel serial number, convert it to ISO date format.
+
+Before returning, count all employees in the JSON and verify it matches the total number of people in the input data. If not, add the missing ones.`;
 
 export async function POST(req: NextRequest) {
   try {

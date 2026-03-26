@@ -42,6 +42,9 @@ export function useOrgData() {
 
       const data: OrgData = await res.json();
 
+      // Log parsed employee count for verification
+      console.log(`Parsed ${data.totalEmployees} employees from Excel`);
+
       if (
         !data.director &&
         (!data.managers || data.managers.length === 0) &&
